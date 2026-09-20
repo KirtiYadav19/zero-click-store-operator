@@ -19,6 +19,10 @@ CRITICAL FUNCTION CALLING AND CONTEXT RULES:
    DO NOT pass full sentences or conversational phrases (like "Maggi hai ya nahi?", "add quantity 2", "make it 2", "Do you have rice?").
 
 2. STRICT SEPARATION OF INTENTS:
+   - FINAL ORDER CONFIRMATION / PLACE ORDER ("ऑर्डर प्लेस कर दो", "order kar do", "place the order", "confirm order", "haan order kar do", "place it", "confirm"):
+     Call place_order tool ONLY.
+     NEVER interpret "order kar do" or "ऑर्डर प्लेस कर दो" as modifying cart quantity or adding items!
+     The Hindi verb "do" / "कर दो" in "order kar do" is a verb meaning "place/do", NOT quantity=2!
    - CHECK AVAILABILITY / STOCK ("Maggi hai ya nahi?", "क्या मैगी है या नहीं?", "Is Maggi available?", "Rice stock mein hai?"):
      Call search_product(query="Maggi") or check_stock. Answer with available stock.
      DO NOT CALL add_to_cart! DO NOT CALL place_order! Cart must remain unchanged!
@@ -26,14 +30,12 @@ CRITICAL FUNCTION CALLING AND CONTEXT RULES:
      Call search_product(query="rice"). Answer with product price. DO NOT CALL add_to_cart!
    - ADD TO CART ("2 kg rice de do", "एक किलो चावल दे दो", "Maggi add kar do", "2 packet"):
      Call search_product followed by add_to_cart.
-   - CONVERSATIONAL QUANTITY FOLLOW-UP ("add quantity 2", "make it 3", "isko 2 kar do", "दो कर दो"):
+   - CONVERSATIONAL QUANTITY FOLLOW-UP ("add quantity 2", "make it 3", "isko 2 kar do"):
      Call update_cart_quantity(product_id, quantity) to SET total quantity.
    - ADD MORE ("add 2 more", "2 aur add kar do", "ek aur"):
      Call add_to_cart(product_id, quantity) to add to existing quantity.
    - REMOVE ITEM ("isko hata do", "remove maggi"):
      Call remove_from_cart(product_id).
-   - ORDER CONFIRMATION ("haan", "yes", "confirm", "order kar do"):
-     Call place_order only when cart has items and customer explicitly confirms.
 
 3. Never invent prices or stock numbers. Always use backend tool output.
 4. Match customer language style naturally.
@@ -163,10 +165,14 @@ CONVERSATIONAL_KEYWORDS = set([
 ])
 
 def _extract_number(text):
-    """Extract numeric or worded quantity from text."""
+    """Extract numeric or worded quantity from text strictly without misinterpreting verbs ('do', 'kar do', 'कर दो')."""
     text_lower = text.strip().lower()
-    
-    # 1. Match numeric digits
+
+    # If the message contains order placement keywords, do NOT extract numbers from verb phrases
+    order_words = ["order", "ऑर्डर", "place", "प्लेस", "confirm", "कन्फर्म", "submit", "बुक"]
+    has_order_word = any(w in text_lower or w in text for w in order_words)
+
+    # 1. Match numeric digits (e.g. "quantity 2", "2 packet", "isko 3 kar do")
     m = re.search(r'\b(\d+)\b', text_lower)
     if m:
         try:
@@ -174,16 +180,30 @@ def _extract_number(text):
         except ValueError:
             pass
 
-    # 2. Match Unicode / word tokens
-    tokens = re.findall(r'[\u0900-\u097F\w]+', text_lower)
+    # If order word is present without numeric digits, return None immediately
+    if has_order_word:
+        return None
+
+    # 2. Strip common verb endings before searching for number word "do"
+    cleaned_for_nums = re.sub(
+        r'\b(?:kar|de|dedo|laga|bata|place|kar-do|hata|dal|daal)\s+(?:do|दो)\b',
+        ' ',
+        text_lower
+    )
+    cleaned_for_nums = re.sub(r'(?:कर|दे|लगा|बता|प्लेस|हटा|डाल)\s*दो', ' ', cleaned_for_nums)
+
+    # 3. Match word tokens from cleaned text
+    tokens = re.findall(r'[\u0900-\u097F\w]+', cleaned_for_nums)
     for token in tokens:
         if token in NUMBER_WORDS:
+            # Special protection for 'do' / 'दो': match only if explicit quantity context
+            if token in ["do", "दो"]:
+                if re.search(r'\b(?:do|दो)\s*(?:kg|kilo|litre|liter|packet|packets|piece|pieces|item|items|पैकेट|किलो|लीटर|पीस|मात्रा)\b', text_lower) or \
+                   re.search(r'\b(?:quantity|qty|make it|make that|change|isko|usko|मात्रा)\s*(?:to|is)?\s*(?:do|दो)\b', text_lower):
+                    return 2
+                else:
+                    continue
             return NUMBER_WORDS[token]
-
-    # 3. Match substring words
-    for word, num in NUMBER_WORDS.items():
-        if word in text_lower:
-            return num
 
     return None
 
@@ -265,17 +285,47 @@ def _rule_based_nlp_handler(session, shop_id, text):
     shop = services.get_shop_or_404(shop_id)
     cart = services.get_cart(session, shop_id)
 
-    # 1. Check for Order Confirmation ("haan", "yes", "confirm", "order kar do", "place order")
-    confirm_phrases = ["order kar do", "order place kar do", "place order", "order place", "order confirm", "confirm order", "confirm kar do", "haan order", "yes order", "confirm"]
-    is_confirm = any(phrase in text_lower for phrase in confirm_phrases) and cart["items"]
-    
-    # Standalone "haan" or "yes" or "ha"
-    if text_lower in ["haan", "yes", "ha", "confirm", "place order"] and cart["items"]:
-        is_confirm = True
+    # 1. Check for Order Confirmation ("ऑर्डर प्लेस कर दो", "order kar do", "place order", "confirm order")
+    confirm_phrases = [
+        # Hindi Devanagari
+        "ऑर्डर प्लेस कर दो", "ऑर्डर कर दो", "ऑर्डर लगा दो", "ऑर्डर कन्फर्म कर दो", "हाँ ऑर्डर कर दो",
+        "बिल के हिसाब से ऑर्डर कर दो", "इसे ऑर्डर कर दो", "हाँ कर दो", "हाँ, कर दो", "ऑर्डर प्लेस करें",
+        "ऑर्डर बुक कर दो", "ऑर्डर प्लेस", "ऑर्डर बुक", "ऑर्डर कन्फर्म", "ऑर्डर कर दीजिए", "ऑर्डर कर दो जी",
+        "ऑर्डर प्लेस कर दीजिए", "कर दो जी",
+
+        # Hinglish / Roman Hindi
+        "order place kar do", "order kar do", "order laga do", "order confirm kar do",
+        "haan order kar do", "ha order kar do", "bil ke hisab se order kar do", "ise order kar do",
+        "haan kar do", "haan, kar do", "order place", "order confirm", "order kar do na",
+        "place order", "place the order", "confirm order", "confirm the order", "confirm it",
+        "yes place it", "yes, place it", "submit order", "submit the order", "order now",
+
+        # English
+        "place the order", "confirm the order", "yes, place it", "submit the order",
+        "order now", "confirm", "place order"
+    ]
+
+    is_confirm = any(phrase in text_lower or phrase in text for phrase in confirm_phrases)
+
+    # Handle pending confirmation state or short confirmations ("yes", "haan", "ha", "हाँ", "जी", "ok")
+    short_confirmations = ["haan", "yes", "ha", "हाँ", "जी", "जी हाँ", "ok", "okay", "ठीक है", "ठीक", "yes place it", "yes please", "kar do", "कर दो"]
+    if not is_confirm and (text_lower in short_confirmations or text in short_confirmations):
+        if session.get('order_confirmation_pending') or ("confirm" in session.get('last_ai_step', '').lower()):
+            is_confirm = True
 
     if is_confirm:
+        if not cart["items"]:
+            return {
+                "reply": "Aapka cart empty hai. Kripya pehle items add karein.",
+                "cart": cart,
+                "step": "Cart Empty"
+            }
+
         order, err = services.place_order_atomic(session, shop_id, "Customer", "9876543210", "")
         if order:
+            session['order_confirmation_pending'] = False
+            session.pop('last_referenced_product_id', None)
+            session.modified = True
             reply = f"Order #{order.id} placed successfully! Total amount: ₹{order.total_amount}. Order and inventory have been updated."
             updated_cart = services.get_cart(session, shop_id)
             return {
@@ -313,6 +363,9 @@ def _rule_based_nlp_handler(session, shop_id, text):
             }
 
         item_summary = ", ".join([f"{item['quantity']} × {item['name']} (₹{item['subtotal']})" for item in cart['items']])
+        session['order_confirmation_pending'] = True
+        session['last_ai_step'] = "Customer Confirmation"
+        session.modified = True
         reply = f"Aapka order summary: {item_summary}. Total Bill: ₹{cart['total']}. Kya order place kar du? (Say 'Haan' or 'Yes' to confirm)"
         return {
             "reply": reply,
@@ -344,12 +397,18 @@ def _rule_based_nlp_handler(session, shop_id, text):
 
     # 5. Check for Conversational Quantity Modification (SET QUANTITY vs ADD MORE)
     is_add_more = any(p in text_lower for p in ["aur add", "more", "ek aur", "one more", "another", "और जोड़"]) or ("aur" in text_lower and "add" in text_lower and "quantity" not in text_lower)
-    
+
+    has_order_keyword = any(w in text_lower or w in text for w in ["order", "ऑर्डर", "place", "प्लेस", "confirm", "कन्फर्म"])
+
     is_set_quantity = (
-        ("quantity" in text_lower or "make it" in text_lower or "make that" in text_lower or "change" in text_lower or
-         "kar do" in text_lower or "kardo" in text_lower or "isko" in text_lower or "isse" in text_lower or "मात्रा" in text_lower or "कर दो" in text_lower or "करदी" in text_lower)
-        and _extract_number(text) is not None
+        not has_order_keyword
         and not is_add_more
+        and _extract_number(text) is not None
+        and (
+            "quantity" in text_lower or "qty" in text_lower or "make it" in text_lower or "make that" in text_lower or
+            "change" in text_lower or "मात्रा" in text_lower or "isko" in text_lower or "isse" in text_lower or
+            "usko" in text_lower or "use" in text_lower or "ise" in text_lower or "set quantity" in text_lower
+        )
     )
 
     if is_add_more:

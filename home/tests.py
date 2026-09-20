@@ -273,3 +273,110 @@ class Prompt18DownloadReceiptTestCase(TestCase):
         response = self.authorized_client.get('/order/999999/receipt/')
         self.assertEqual(response.status_code, 404)
 
+
+class CriticalOrderConfirmationVsQuantityTestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='critical_bug_shopkeeper', password='Password123!')
+        self.profile = ShopkeeperProfile.objects.create(user=self.user, phone='9999911111')
+        self.shop = Shop.objects.create(shopkeeper=self.profile, name='Rahul Kirana Store')
+        self.maggi = Product.objects.create(
+            shop=self.shop,
+            name='Maggi 2-Minute Noodles',
+            price=Decimal('15.00'),
+            unit='packet',
+            stock=10,
+            is_active=True
+        )
+        self.client = Client()
+
+    def test_order_place_kar_do_hindi(self):
+        """'ऑर्डर प्लेस कर दो' MUST place order with Qty=1, NOT change quantity to 2."""
+        session = self.client.session
+        # Step 1 & 2: Add 1 Maggi to cart
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        # Step 3 & 4: User says 'ऑर्डर प्लेस कर दो'
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "ऑर्डर प्लेस कर दो")
+
+        # Step 5 & 6: Order placed, inventory decreased by 1, order item quantity = 1
+        self.assertIn("order_id", res)
+        order = Order.objects.get(id=res["order_id"])
+        self.assertEqual(order.items.count(), 1)
+        item = order.items.first()
+        self.assertEqual(item.quantity, 1) # MUST BE 1, NOT 2!
+        self.assertEqual(item.subtotal, Decimal('15.00'))
+
+        self.maggi.refresh_from_db()
+        self.assertEqual(self.maggi.stock, 9) # Stock decreased by exactly 1
+
+    def test_order_kar_do_hinglish(self):
+        """'order kar do' MUST place order with Qty=1."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "order kar do")
+
+        self.assertIn("order_id", res)
+        order = Order.objects.get(id=res["order_id"])
+        self.assertEqual(order.items.first().quantity, 1)
+
+    def test_place_the_order_english(self):
+        """'place the order' MUST place order with Qty=1."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "place the order")
+
+        self.assertIn("order_id", res)
+        order = Order.objects.get(id=res["order_id"])
+        self.assertEqual(order.items.first().quantity, 1)
+
+    def test_haan_order_kar_do(self):
+        """'haan order kar do' MUST place order with Qty=1."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "haan order kar do")
+
+        self.assertIn("order_id", res)
+        order = Order.objects.get(id=res["order_id"])
+        self.assertEqual(order.items.first().quantity, 1)
+
+    def test_explicit_quantity_2_kar_do(self):
+        """'quantity 2 kar do' MUST set quantity to 2."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "quantity 2 kar do")
+
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 2)
+
+    def test_explicit_isko_2_kar_do(self):
+        """'isko 2 kar do' MUST set quantity to 2."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "isko 2 kar do")
+
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 2)
+
+    def test_2_aur_add_kar_do(self):
+        """'2 aur add kar do' MUST increment quantity by 2 (1 + 2 = 3)."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "2 aur add kar do")
+
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 3)
+
+    def test_aur_maggi_chahiye_does_not_place_order(self):
+        """'aur Maggi chahiye' should NOT automatically place an order."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "aur Maggi chahiye")
+
+        self.assertNotIn("order_id", res)
+        self.assertEqual(Order.objects.filter(shop=self.shop).count(), 0)
+
+
