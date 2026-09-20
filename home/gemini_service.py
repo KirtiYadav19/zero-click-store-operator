@@ -529,12 +529,13 @@ def _rule_based_nlp_handler(session, shop_id, text):
 
     # Check if user just specified a quantity follow-up for the last referenced item (e.g. "2 packet", "2", "दो पैकेट")
     num_val = _extract_number(text)
-    if (not product_query or product_query in CONVERSATIONAL_KEYWORDS) and num_val is not None:
-        target_prod = _get_referenced_product(session, shop_id, cart)
-        if target_prod:
+    if num_val is not None:
+        target_prod = _get_referenced_product(session, shop_id, cart, product_hint=product_query)
+        if target_prod and (not product_query or product_query in CONVERSATIONAL_KEYWORDS or product_query in SINGLEWORD_FILLERS or not services.search_product(shop_id, product_query)):
             succ, m = services.add_to_cart(session, shop_id, target_prod.id, num_val)
             updated_cart = services.get_cart(session, shop_id)
             session['last_referenced_product_id'] = target_prod.id
+            session.modified = True
             if succ:
                 reply = f"Added {num_val} × {target_prod.name} (₹{target_prod.price * Decimal(num_val)}) to cart. Total: ₹{updated_cart['total']}. Aur kuch chahiye?"
             else:
