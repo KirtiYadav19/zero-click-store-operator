@@ -1,35 +1,102 @@
 {% extends 'base.html' %}
 
-{% block title %}Choose Your Store - Zero-Click Store Operator{% endblock %}
+{% block title %}Zero-Click Store Operator — AI-Powered Kirana Ordering{% endblock %}
 
 {% block content %}
+
+<!-- Hero Banner -->
+<div style="background: linear-gradient(135deg, #1a2530 0%, #27ae60 100%); border-radius: 10px; padding: 2.5rem 2rem; margin-bottom: 2rem; text-align: center; color: #fff;">
+    <h2 style="font-size: 2rem; font-weight: 700; margin-bottom: 0.6rem; letter-spacing: -0.5px;">Zero-Click Store Operator</h2>
+    <p style="font-size: 1.1rem; color: #d5f5e3; margin-bottom: 1.5rem;">
+        Autonomous AI Store Operator for Neighborhood Kirana Shops
+    </p>
+    <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+        <span style="background: rgba(255,255,255,0.15); border-radius: 20px; padding: 0.4rem 1rem; font-size: 0.88rem; font-weight: 600;">🤖 Gemini AI</span>
+        <span style="background: rgba(255,255,255,0.15); border-radius: 20px; padding: 0.4rem 1rem; font-size: 0.88rem; font-weight: 600;">🎙️ Sarvam Voice</span>
+        <span style="background: rgba(255,255,255,0.15); border-radius: 20px; padding: 0.4rem 1rem; font-size: 0.88rem; font-weight: 600;">🇮🇳 Hindi + Hinglish + English</span>
+        <span style="background: rgba(255,255,255,0.15); border-radius: 20px; padding: 0.4rem 1rem; font-size: 0.88rem; font-weight: 600;">🐘 PostgreSQL</span>
+        <span style="background: rgba(255,255,255,0.15); border-radius: 20px; padding: 0.4rem 1rem; font-size: 0.88rem; font-weight: 600;">🔒 Atomic Transactions</span>
+    </div>
+</div>
+
+<!-- Feature Grid (for evaluators) -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 2rem;">
+    <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.25rem;">
+        <h3 style="font-size: 1rem; color: #1a2530; margin-bottom: 0.75rem; border-bottom: 2px solid #27ae60; padding-bottom: 0.4rem;">🛍️ Customer Flow</h3>
+        <ul style="color: #555; font-size: 0.9rem; line-height: 2; list-style: none; padding: 0;">
+            <li>✅ Choose a nearby active shop</li>
+            <li>✅ Speak or type to AI Cashier</li>
+            <li>✅ Hindi / Hinglish / English support</li>
+            <li>✅ Gemini function calling for cart ops</li>
+            <li>✅ Live inventory & stock validation</li>
+            <li>✅ Atomic order placement</li>
+        </ul>
+    </div>
+    <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.25rem;">
+        <h3 style="font-size: 1rem; color: #1a2530; margin-bottom: 0.75rem; border-bottom: 2px solid #3498db; padding-bottom: 0.4rem;">🏪 Shopkeeper Flow</h3>
+        <ul style="color: #555; font-size: 0.9rem; line-height: 2; list-style: none; padding: 0;">
+            <li>✅ Register &amp; Login</li>
+            <li>✅ Create shop with address &amp; phone</li>
+            <li>✅ Add / Edit / Deactivate products</li>
+            <li>✅ Set price &amp; stock quantity</li>
+            <li>✅ Receive &amp; view customer orders</li>
+            <li>✅ Multi-shop tenant isolation</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Store Selection -->
 <div class="card">
     <div style="text-align: center; margin-bottom: 2rem;">
-        <h2 style="border: none; margin-bottom: 0.5rem; font-size: 2rem; color: #1a2530;">Choose Your Nearby Store</h2>
-        <p style="color: #666; font-size: 1.1rem;">Select a shop below to start ordering directly with AI assistance.</p>
+        <h2 style="border: none; margin-bottom: 0.5rem; font-size: 1.6rem; color: #1a2530;">Choose a Nearby Store</h2>
+        <p style="color: #666; font-size: 1rem;">Select a shop below to start ordering with your AI-powered cashier.</p>
     </div>
 
     {% if shops %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem;">
             {% for shop in shops %}
-                <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 6px rgba(0,0,0,0.04); display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="background: #fff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-direction: column; justify-content: space-between; transition: border-color 0.2s;"
+                     onmouseover="this.style.borderColor='#27ae60'" onmouseout="this.style.borderColor='#e0e0e0'">
                     <div>
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                            <h3 style="font-size: 1.25rem; color: #2c3e50;">{{ shop.name }}</h3>
+                            <h3 style="font-size: 1.2rem; color: #2c3e50;">{{ shop.name }}</h3>
                             <span class="badge badge-active">Open</span>
                         </div>
-                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 0.4rem;"><strong>📍 Address:</strong> {{ shop.address|default:"Local Market" }}</p>
-                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 1.25rem;"><strong>📞 Phone:</strong> {{ shop.phone|default:"Available" }}</p>
+                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 0.35rem;">📍 {{ shop.address|default:"Local Market" }}</p>
+                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 1.25rem;">📞 {{ shop.phone|default:"Available" }}</p>
                     </div>
-                    <a href="{% url 'customer_shop_order' shop.id %}" class="btn" style="width: 100%;">ORDER NOW →</a>
+                    <a href="{% url 'customer_shop_order' shop.id %}" class="btn" style="width: 100%; display: block; text-align: center;">
+                        ORDER NOW →
+                    </a>
                 </div>
             {% endfor %}
         </div>
     {% else %}
         <div style="text-align: center; padding: 3rem 1rem; color: #777;">
-            <p style="font-size: 1.1rem; margin-bottom: 1rem;">No active shops available right now.</p>
-            <p style="font-size: 0.95rem; color: #999;">Are you a shopkeeper? <a href="{% url 'shopkeeper_register' %}" style="color: #27ae60;">Register your shop here</a>.</p>
+            <p style="font-size: 1.5rem; margin-bottom: 0.75rem;">🏪</p>
+            <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">No active shops are available right now.</p>
+            <p style="font-size: 0.95rem; color: #999;">
+                Are you a shopkeeper? <a href="{% url 'shopkeeper_register' %}" style="color: #27ae60; font-weight: 600;">Register your shop here</a>.
+            </p>
         </div>
     {% endif %}
 </div>
+
+<!-- Demo Quick-Start -->
+<div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 1.25rem 1.5rem; margin-top: 0.5rem;">
+    <h4 style="color: #2c3e50; margin-bottom: 0.6rem; font-size: 0.95rem;">💡 Demo Quick-Start (Hackathon Judges)</h4>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.88rem; color: #555;">
+        <div>
+            <strong>Shopkeeper Login:</strong><br>
+            Username: <code>rahul_shopkeeper</code><br>
+            Password: <code>pass123</code>
+        </div>
+        <div>
+            <strong>Try ordering (after selecting a shop):</strong><br>
+            🗣️ <em>"2 kilo atta aur Amul Milk chahiye"</em><br>
+            🗣️ <em>"What is the price of Tata Salt?"</em>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

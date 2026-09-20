@@ -376,18 +376,23 @@ flowchart TD
 
 ---
 
-## 19. Voice Architecture (Secondary / Stretch Goal)
+## 19. Voice Architecture (Implemented)
 
 ```mermaid
-flowchart LR
-    Mic["User Microphone"] -->|Audio Payload| STT["Sarvam STT API"]
-    STT -->|Transcribed Text| Django["Django Chat View"]
-    Django -->|AI Processing| Gemini["Gemini API"]
-    Django -->|Response Text| TTS["Sarvam TTS API"]
-    TTS -->|Audio Stream| Speaker["Customer Speaker"]
+flowchart TD
+    CustomerVoice["Customer Voice Utterance"] -->|MediaRecorder Blob| JS["Browser chat.js"]
+    JS -->|POST /shop/shop_id/voice-input/| VoiceView["Django Voice Endpoint"]
+    VoiceView -->|audio.wav| SarvamSTT["Sarvam STT API (saarika:v1)"]
+    SarvamSTT -->|Transcript| SharedEngine["Gemini AI & Django Tool Engine"]
+    SharedEngine -->|PostgreSQL Queries & Cart| DB[("PostgreSQL")]
+    SharedEngine -->|Text Response| SarvamTTS["Sarvam TTS API (bulbul:v3)"]
+    SarvamTTS -->|Base64 Audio URI| JS
+    JS -->|Audio.play()| Speaker["Customer Speaker"]
 
-    style STT fill:#fff3cd,stroke:#333
-    style TTS fill:#fff3cd,stroke:#333
+    style SarvamSTT fill:#e1f5fe,stroke:#0288d1
+    style SarvamTTS fill:#e1f5fe,stroke:#0288d1
+```
+
 ```
 
 ---
@@ -611,3 +616,15 @@ sequenceDiagram
 * Voice streaming over WebSockets for real-time natural dialogue.
 * Proactive store stock reorder alerts for kirana shopkeepers.
 * Personalization & customer order history lookup.
+
+---
+
+## 37. Implemented MVP Summary
+* **Backend:** Python 3.14 + Django Monolith + Django ORM
+* **Database:** PostgreSQL (Source of Truth)
+* **Frontend:** Django Templates + HTML5 + CSS + Vanilla JavaScript
+* **AI Layer:** Google Gemini API (`google-genai` / `google-generativeai`) + Server-side Tool Execution + Fallback Engine
+* **Voice Layer:** Sarvam AI STT (`saaras:v3`) + Sarvam AI TTS (`bulbul:v3`) Push-To-Talk
+* **Supported Languages:** English, Hindi, Hinglish (code-mixed)
+* **Cart & Order Safety:** Django Session Cart + Python `Decimal` Calculation + `transaction.atomic()` Order Placement & Row-level Inventory Deduction
+

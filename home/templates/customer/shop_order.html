@@ -13,46 +13,54 @@
 
 <div style="display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; align-items: start;">
 
-    <!-- Left Column: Products & Chat Area Placeholder -->
+    <!-- Left Column: AI Chat & Voice Interface -->
     <div>
-        <!-- AI Order Assistant Placeholder Box -->
-        <div class="card" style="margin-bottom: 1.5rem; border-left: 4px solid #3498db; background: #fafbfc;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <h3 style="font-size: 1.1rem; color: #2c3e50;">🤖 AI Order Assistant</h3>
-                <span class="badge badge-info" style="background:#e1f5fe; color:#0288d1;">Coming in Step 7</span>
+        <!-- AI Order Assistant Chat Box -->
+        <div class="card" style="margin-bottom: 1.5rem; border-left: 4px solid #27ae60; background: #ffffff;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #eee; padding-bottom: 0.5rem;">
+                <h3 style="font-size: 1.15rem; color: #2c3e50;">🤖 Multilingual AI Voice & Text Cashier</h3>
+                <span class="badge badge-active" style="font-size:0.75rem;">Sarvam AI + Gemini</span>
             </div>
-            <p style="color: #555; font-size: 0.95rem;">
-                Natural-language text & voice ordering (e.g. <em>"2 Maggi aur 1 Aata"</em>) will be active here in the next step. 
-                Use the quick catalog controls below to test cart building.
-            </p>
+
+            <!-- Chat History Area -->
+            <div id="chatHistory" style="height: 280px; overflow-y: auto; border: 1px solid #e9ecef; border-radius: 6px; padding: 1rem; background: #f8f9fa; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                <!-- Initial AI Welcome -->
+                <div style="background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 8px; padding: 0.75rem 1rem; max-width: 85%; align-self: flex-start; font-size: 0.95rem; color: #1b5e20;">
+                    <strong>AI Cashier:</strong> Namaste! Welcome to {{ shop.name }}. What would you like to order today? (Type or click 🎤 Speak to order in English, Hindi, or Hinglish)
+                </div>
+            </div>
+
+            <!-- Voice & Text Controls -->
+            <form id="chatForm" style="display: flex; gap: 0.5rem;">
+                {% csrf_token %}
+                <input type="text" id="userInput" placeholder="Type or click 🎤 Speak..." required style="flex: 1; padding: 0.75rem; border: 1px solid #ccc; border-radius: 5px; font-size: 0.95rem;">
+                <button type="submit" id="sendBtn" class="btn">Send</button>
+                <button type="button" id="micBtn" class="btn btn-secondary" style="background:#8e44ad; min-width: 100px;">🎤 Speak</button>
+            </form>
+            <p id="voiceStatus" style="color: #8e44ad; font-size: 0.85rem; margin-top: 0.4rem; display: none; font-weight: 600;">🔴 Recording... Speak now and click Stop when done.</p>
         </div>
 
-        <!-- Available Products Catalog -->
+        <!-- Available Products Catalog (Quick View) -->
         <div class="card">
-            <h3 style="font-size: 1.2rem; color: #2c3e50; margin-bottom: 1rem; border-bottom: 1px solid #eee; padding-bottom: 0.5rem;">
-                Store Products
+            <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 1rem; border-bottom: 1px solid #eee; padding-bottom: 0.5rem;">
+                Store Catalog Quick View
             </h3>
 
             {% if products %}
-                <div style="display: grid; gap: 1rem;">
+                <div style="display: grid; gap: 0.75rem;">
                     {% for product in products %}
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.85rem; border: 1px solid #e9ecef; border-radius: 6px; background: #fff;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border: 1px solid #e9ecef; border-radius: 6px; background: #fff;">
                             <div>
-                                <h4 style="font-size: 1.05rem; color: #2c3e50; margin-bottom: 0.2rem;">{{ product.name }}</h4>
-                                <p style="color: #555; font-size: 0.9rem;">
+                                <h4 style="font-size: 0.95rem; color: #2c3e50; margin-bottom: 0.1rem;">{{ product.name }}</h4>
+                                <p style="color: #555; font-size: 0.85rem;">
                                     <strong>₹{{ product.price }}</strong> per {{ product.unit }} 
-                                    <span style="color: #888; font-size: 0.85rem; margin-left: 0.5rem;">(Stock: {{ product.stock }})</span>
+                                    <span style="color: #888; margin-left: 0.5rem;">(Stock: {{ product.stock }})</span>
                                 </p>
                             </div>
                             {% if product.stock > 0 %}
-                                <form method="post" action="{% url 'customer_cart_add' shop.id %}" style="display: flex; align-items: center; gap: 0.5rem;">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="product_id" value="{{ product.id }}">
-                                    <input type="number" name="quantity" value="1" min="1" max="{{ product.stock }}" style="width: 60px; padding: 0.4rem; border: 1px solid #ccc; border-radius: 4px; text-align: center;">
-                                    <button type="submit" class="btn btn-sm">+ Add</button>
-                                </form>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="quickAdd('{{ product.name }}')">+ Ask AI</button>
                             {% else %}
-                                <span style="color: #e74c3c; font-weight: 600; font-size: 0.85rem;">Out of Stock</span>
+                                <span style="color: #e74c3c; font-weight: 600; font-size: 0.8rem;">Out of Stock</span>
                             {% endif %}
                         </div>
                     {% endfor %}
@@ -68,64 +76,304 @@
         <div class="card" style="position: sticky; top: 1.5rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 0.5rem;">
                 <h3 style="font-size: 1.25rem; color: #1a2530;">CURRENT ORDER</h3>
-                {% if cart.items %}
-                    <form method="post" action="{% url 'customer_cart_clear' shop.id %}">
-                        {% csrf_token %}
-                        <button type="submit" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:0.85rem;">Clear All</button>
-                    </form>
-                {% endif %}
+                <form method="post" action="{% url 'customer_cart_clear' shop.id %}">
+                    {% csrf_token %}
+                    <button type="submit" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:0.85rem;">Clear All</button>
+                </form>
             </div>
 
-            {% if cart.items %}
-                <div style="display: grid; gap: 0.75rem; margin-bottom: 1.25rem;">
-                    {% for item in cart.items %}
-                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; border-bottom: 1px dashed #eee; padding-bottom: 0.5rem;">
-                            <div>
-                                <div style="font-weight: 600; color: #2c3e50;">{{ item.name }}</div>
-                                <div style="color: #777; font-size: 0.85rem;">{{ item.quantity }} × ₹{{ item.price }}</div>
+            <div id="cartContainer">
+                {% if cart.items %}
+                    <div style="display: grid; gap: 0.75rem; margin-bottom: 1.25rem;">
+                        {% for item in cart.items %}
+                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; border-bottom: 1px dashed #eee; padding-bottom: 0.5rem;">
+                                <div>
+                                    <div style="font-weight: 600; color: #2c3e50;">{{ item.name }}</div>
+                                    <div style="color: #777; font-size: 0.85rem;">{{ item.quantity }} × ₹{{ item.price }}</div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-weight: 600; color: #1a2530;">₹{{ item.subtotal }}</div>
+                                </div>
                             </div>
-                            <div style="text-align: right;">
-                                <div style="font-weight: 600; color: #1a2530;">₹{{ item.subtotal }}</div>
-                                <form method="post" action="{% url 'customer_cart_update' shop.id %}" style="display: inline-block; margin-top: 0.2rem;">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="product_id" value="{{ item.product_id }}">
-                                    <input type="hidden" name="quantity" value="0">
-                                    <button type="submit" style="background:none; border:none; color:#999; cursor:pointer; font-size:0.75rem;" title="Remove item">✕ Remove</button>
-                                </form>
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
-
-                <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-bottom: 1.25rem;">
-                    <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; color: #1a2530;">
-                        <span>TOTAL</span>
-                        <span>₹{{ cart.total }}</span>
+                        {% endfor %}
                     </div>
-                </div>
 
-                <a href="{% url 'customer_checkout' shop.id %}" class="btn" style="width: 100%; display: block; text-align: center;">PROCEED TO CHECKOUT →</a>
-            {% else %}
-                <div style="text-align: center; padding: 2rem 0; color: #888;">
-                    <p style="margin-bottom: 0.5rem;">Your cart is empty.</p>
-                    <p style="font-size: 0.85rem;">Add items from the store catalog to build your order.</p>
-                </div>
-            {% endif %}
+                    <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-bottom: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; color: #1a2530;">
+                            <span>TOTAL</span>
+                            <span>₹{{ cart.total }}</span>
+                        </div>
+                    </div>
+
+                    <a href="{% url 'customer_checkout' shop.id %}" class="btn" style="width: 100%; display: block; text-align: center;">PROCEED TO CHECKOUT →</a>
+                {% else %}
+                    <div style="text-align: center; padding: 2rem 0; color: #888;">
+                        <p style="margin-bottom: 0.5rem;">Your cart is empty.</p>
+                        <p style="font-size: 0.85rem;">Chat or speak to the AI cashier to build your order.</p>
+                    </div>
+                {% endif %}
+            </div>
         </div>
 
-        <!-- Verification Checklist Preview Panel -->
+        <!-- Autonomous Verification Status Panel -->
         <div class="card" style="margin-top: 1rem; padding: 1.25rem; font-size: 0.85rem;">
-            <h4 style="font-size: 0.95rem; color: #555; margin-bottom: 0.75rem;">AUTONOMOUS VERIFICATION</h4>
-            <ul style="list-style: none; display: grid; gap: 0.4rem; color: #666;">
-                <li>{% if cart.items %}✓{% else %}○{% endif %} Product Identification</li>
-                <li>{% if cart.items %}✓{% else %}○{% endif %} Database Stock Retrieval</li>
-                <li>{% if cart.items %}✓{% else %}○{% endif %} Session Cart Building</li>
-                <li>{% if cart.items %}✓{% else %}○{% endif %} Python Decimal Bill Calculation</li>
-                <li>○ Customer Confirmation</li>
-                <li>○ Atomic Order Commit</li>
+            <h4 style="font-size: 0.95rem; color: #555; margin-bottom: 0.75rem; border-bottom: 1px solid #eee; padding-bottom: 0.4rem;">AUTONOMOUS VERIFICATION</h4>
+            <ul id="verificationList" style="list-style: none; display: grid; gap: 0.4rem; color: #666;">
+                <li id="step-voice">○ Voice Input / Speech Recognition</li>
+                <li id="step-ai">○ AI Parsing</li>
+                <li id="step-db">○ Database Retrieval</li>
+                <li id="step-stock">○ Inventory Check</li>
+                <li id="step-cart">○ Cart Building</li>
+                <li id="step-bill">○ Bill Calculation</li>
+                <li id="step-confirm">○ Customer Confirmation</li>
+                <li id="step-order">○ Order Creation</li>
+                <li id="step-inv">○ Inventory Update</li>
             </ul>
         </div>
     </div>
 
 </div>
+
+<!-- Vanilla JS Push-To-Talk & Voice Playback Script -->
+<script>
+    const chatForm = document.getElementById('chatForm');
+    const userInput = document.getElementById('userInput');
+    const chatHistory = document.getElementById('chatHistory');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    const voiceStatus = document.getElementById('voiceStatus');
+    const cartContainer = document.getElementById('cartContainer');
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+
+    function quickAdd(productName) {
+        userInput.value = `1 ${productName} add kar do`;
+        chatForm.dispatchEvent(new Event('submit'));
+    }
+
+    function appendMessage(sender, text, isAi = false) {
+        const msgDiv = document.createElement('div');
+        msgDiv.style.padding = '0.75rem 1rem';
+        msgDiv.style.borderRadius = '8px';
+        msgDiv.style.maxWidth = '85%';
+        msgDiv.style.fontSize = '0.95rem';
+        msgDiv.style.lineHeight = '1.4';
+
+        if (isAi) {
+            msgDiv.style.background = '#e8f5e9';
+            msgDiv.style.border = '1px solid #c8e6c9';
+            msgDiv.style.color = '#1b5e20';
+            msgDiv.style.alignSelf = 'flex-start';
+            msgDiv.innerHTML = `<strong>AI Cashier:</strong> ${text}`;
+        } else {
+            msgDiv.style.background = '#e3f2fd';
+            msgDiv.style.border = '1px solid #bbdefb';
+            msgDiv.style.color = '#0d47a1';
+            msgDiv.style.alignSelf = 'flex-end';
+            msgDiv.innerHTML = `<strong>You:</strong> ${text}`;
+        }
+
+        chatHistory.appendChild(msgDiv);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    function updateVerificationSteps(stepName, isVoice = false) {
+        const stepMap = {
+            'Voice Input': ['step-voice'],
+            'AI Parsing': ['step-ai'],
+            'Database Retrieval': ['step-ai', 'step-db'],
+            'Inventory Check': ['step-ai', 'step-db', 'step-stock'],
+            'Cart Building': ['step-ai', 'step-db', 'step-stock', 'step-cart'],
+            'Bill Calculation': ['step-ai', 'step-db', 'step-stock', 'step-cart', 'step-bill'],
+            'Customer Confirmation': ['step-ai', 'step-db', 'step-stock', 'step-cart', 'step-bill', 'step-confirm'],
+            'Order Creation': ['step-ai', 'step-db', 'step-stock', 'step-cart', 'step-bill', 'step-confirm', 'step-order', 'step-inv'],
+            'Confirmation Sent': ['step-ai', 'step-db', 'step-stock', 'step-cart', 'step-bill', 'step-confirm', 'step-order', 'step-inv']
+        };
+
+        const activeIds = stepMap[stepName] || ['step-ai'];
+        if (isVoice) activeIds.push('step-voice');
+        
+        document.querySelectorAll('#verificationList li').forEach(li => {
+            if (activeIds.includes(li.id)) {
+                li.style.color = '#27ae60';
+                li.style.fontWeight = '600';
+                li.innerHTML = li.innerHTML.replace('○', '✓');
+            }
+        });
+    }
+
+    function renderCart(cartData) {
+        if (!cartData || !cartData.items || cartData.items.length === 0) {
+            cartContainer.innerHTML = `
+                <div style="text-align: center; padding: 2rem 0; color: #888;">
+                    <p style="margin-bottom: 0.5rem;">Your cart is empty.</p>
+                    <p style="font-size: 0.85rem;">Chat or speak to the AI cashier to build your order.</p>
+                </div>`;
+            return;
+        }
+
+        let itemsHtml = cartData.items.map(item => `
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; border-bottom: 1px dashed #eee; padding-bottom: 0.5rem;">
+                <div>
+                    <div style="font-weight: 600; color: #2c3e50;">${item.name}</div>
+                    <div style="color: #777; font-size: 0.85rem;">${item.quantity} × ₹${item.price}</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-weight: 600; color: #1a2530;">₹${item.subtotal}</div>
+                </div>
+            </div>
+        `).join('');
+
+        cartContainer.innerHTML = `
+            <div style="display: grid; gap: 0.75rem; margin-bottom: 1.25rem;">
+                ${itemsHtml}
+            </div>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-bottom: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; color: #1a2530;">
+                    <span>TOTAL</span>
+                    <span>₹${cartData.total}</span>
+                </div>
+            </div>
+            <a href="/shop/{{ shop.id }}/checkout/" class="btn" style="width: 100%; display: block; text-align: center;">PROCEED TO CHECKOUT →</a>
+        `;
+    }
+
+    // Text Form Submission
+    chatForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const text = userInput.value.trim();
+        if (!text) return;
+
+        appendMessage('You', text, false);
+        userInput.value = '';
+        sendBtn.disabled = true;
+        sendBtn.innerText = 'Thinking...';
+
+        try {
+            const response = await fetch('/shop/{{ shop.id }}/ai-chat/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({ message: text })
+            });
+
+            const data = await response.json();
+            if (data.reply) {
+                appendMessage('AI', data.reply, true);
+            }
+            if (data.cart) {
+                renderCart(data.cart);
+            }
+            if (data.step) {
+                updateVerificationSteps(data.step);
+            }
+            if (data.order_id) {
+                setTimeout(() => {
+                    window.location.href = `/order/${data.order_id}/success/`;
+                }, 1800);
+            }
+        } catch (err) {
+            appendMessage('AI', 'Technical issue processing request. Kripya firse try kare.', true);
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerText = 'Send';
+        }
+    });
+
+    // Push-To-Talk Voice Recording Handler
+    micBtn.addEventListener('click', async function() {
+        if (!isRecording) {
+            // Start recording
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    sendVoiceAudio(audioBlob);
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                micBtn.innerText = '⏹ Stop Recording';
+                micBtn.style.background = '#e74c3c';
+                voiceStatus.style.display = 'block';
+            } catch (err) {
+                alert('Microphone access permission was denied or unavailable. You can continue using text chat.');
+            }
+        } else {
+            // Stop recording
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            isRecording = false;
+            micBtn.innerText = '🎤 Speak';
+            micBtn.style.background = '#8e44ad';
+            voiceStatus.style.display = 'none';
+        }
+    });
+
+    async function sendVoiceAudio(audioBlob) {
+        micBtn.disabled = true;
+        micBtn.innerText = '⏳ Processing...';
+
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'utterance.wav');
+
+        try {
+            const response = await fetch('/shop/{{ shop.id }}/voice-input/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                },
+                body: formData
+            });
+
+            const data = await response.json();
+            if (data.transcript) {
+                appendMessage('You 🎤', data.transcript, false);
+            }
+            if (data.reply) {
+                appendMessage('AI 🗣️', data.reply, true);
+            }
+            if (data.cart) {
+                renderCart(data.cart);
+            }
+            if (data.step) {
+                updateVerificationSteps(data.step, true);
+            }
+            if (data.audio) {
+                try {
+                    const audioPlayer = new Audio(data.audio);
+                    audioPlayer.play();
+                } catch (audioErr) {
+                    console.warn('Audio playback failed or blocked by browser:', audioErr);
+                }
+            }
+            if (data.order_id) {
+                setTimeout(() => {
+                    window.location.href = `/order/${data.order_id}/success/`;
+                }, 1800);
+            }
+        } catch (err) {
+            appendMessage('AI', 'Voice recognition or processing failed. Please try again or type your request.', true);
+        } finally {
+            micBtn.disabled = false;
+            micBtn.innerText = '🎤 Speak';
+        }
+    }
+</script>
 {% endblock %}

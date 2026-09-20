@@ -1,11 +1,15 @@
+import json
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
+from django.http import JsonResponse
 from .models import ShopkeeperProfile, Shop, Product, Order, OrderItem
 from .forms import ProductForm
 from . import services
+from . import gemini_service
+from . import sarvam_service
 
 def _get_user_shop(user):
     profile = getattr(user, 'profile', None)
@@ -335,3 +339,67 @@ def customer_order_success(request, order_id):
         'items': items,
     }
     return render(request, 'customer/order_success.html', context)
+
+
+def customer_ai_chat(request, shop_id):
+    """JSON AJAX Endpoint for Gemini AI Customer Chat."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+
+    try:
+        if request.content_type == 'application/json':
+            data = json.loads(request.body)
+            message = data.get('message', '').strip()
+        else:
+            message = request.POST.get('message', '').strip()
+    except Exception:
+        message = request.POST.get('message', '').strip()
+
+    if not message:
+        return JsonResponse({'error': 'Empty message'}, status=400)
+
+    # Security: Server validates shop_id against PostgreSQL
+    shop = services.get_shop_or_404(shop_id)
+
+    # Process through Gemini AI / NLP engine
+    result = gemini_service.process_customer_message(request.session, shop.id, message)
+    return JsonResponse(result)
+
+
+def customer_voice_input(request, shop_id):
+    """JSON AJAX Endpoint for Sarvam STT -> Gemini AI -> Sarvam TTS pipeline."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST method required'}, status=405)
+
+    audio_file = request.FILES.get('audio')
+    if not audio_file:
+        return JsonResponse({'error': 'No audio file uploaded'}, status=400)
+
+    shop = services.get_shop_or_404(shop_id)
+
+    # 1. Sarvam Speech-to-Text
+    audio_bytes = audio_file.read()
+    transcript, stt_err = sarvam_service.speech_to_text(audio_bytes, audio_file.name)
+
+    if not transcript:
+        return JsonResponse({
+            'error': stt_err or 'No speech detected. Please try again or use text chat.',
+            'transcript': ''
+        }, status=400)
+
+    # 2. Re-use 100% existing Gemini + Django tool pipeline
+    result = gemini_service.process_customer_message(request.session, shop.id, transcript)
+
+    # 3. Sarvam Text-to-Speech audio generation
+    audio_uri = sarvam_service.text_to_speech(result.get('reply', ''))
+
+    # Return unified response
+    response_data = {
+        'transcript': transcript,
+        'reply': result.get('reply', ''),
+        'audio': audio_uri,
+        'cart': result.get('cart'),
+        'step': result.get('step', 'Voice Input'),
+        'order_id': result.get('order_id')
+    }
+    return JsonResponse(response_data)

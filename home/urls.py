@@ -5,6 +5,8 @@ urlpatterns = [
     # Customer routes
     path('', views.customer_home, name='customer_home'),
     path('shop/<int:shop_id>/order/', views.customer_shop_order, name='customer_shop_order'),
+    path('shop/<int:shop_id>/ai-chat/', views.customer_ai_chat, name='customer_ai_chat'),
+    path('shop/<int:shop_id>/voice-input/', views.customer_voice_input, name='customer_voice_input'),
     path('shop/<int:shop_id>/cart/add/', views.customer_cart_add, name='customer_cart_add'),
     path('shop/<int:shop_id>/cart/update/', views.customer_cart_update, name='customer_cart_update'),
     path('shop/<int:shop_id>/cart/clear/', views.customer_cart_clear, name='customer_cart_clear'),
