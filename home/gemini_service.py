@@ -514,6 +514,7 @@ def _rule_based_nlp_handler(session, shop_id, text):
 
     product = matches[0]
     session['last_referenced_product_id'] = product.id
+    session.modified = True
 
     # Handle Price Check Query (Informational ONLY, NO CART ADDITION)
     if is_price_check:

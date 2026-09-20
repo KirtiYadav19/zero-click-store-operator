@@ -1,7 +1,7 @@
 from decimal import Decimal
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
-from home.models import ShopkeeperProfile, Shop, Product, Order, OrderItem
+from home.models import ShopkeeperProfile, Shop, Product, Customer, Order, OrderItem
 from home import services, gemini_service
 
 class ShopkeeperAndInventoryTestCase(TestCase):
