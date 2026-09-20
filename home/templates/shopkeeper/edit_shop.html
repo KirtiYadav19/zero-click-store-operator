@@ -1,44 +1,44 @@
 {% extends 'base.html' %}
 
-{% block title %}Create Your Shop - Zero-Click Store Operator{% endblock %}
+{% block title %}Edit Shop Details & Location - Zero-Click Store Operator{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h2>Create Your Shop</h2>
-    <p style="margin-bottom: 1.5rem; color: #666;">Fill in your shop details and set your store's map location to enable location-based customer discovery.</p>
+    <h2>Edit Shop Details & Location</h2>
+    <p style="margin-bottom: 1.5rem; color: #666;">Update your store profile and map coordinates for nearby customer discovery.</p>
 
-    <form method="post" action="{% url 'shopkeeper_create_shop' %}">
+    <form method="post" action="{% url 'shopkeeper_edit_shop' %}">
         {% csrf_token %}
 
         <div class="form-group">
             <label for="name">Shop Name *</label>
-            <input type="text" id="name" name="name" required placeholder="e.g. Rahul General Store">
+            <input type="text" id="name" name="name" required value="{{ shop.name }}" placeholder="e.g. Rahul General Store">
         </div>
 
         <div class="form-group">
             <label for="phone">Shop Contact Phone</label>
-            <input type="text" id="phone" name="phone" placeholder="e.g. 9876543210">
+            <input type="text" id="phone" name="phone" value="{{ shop.phone|default:'' }}" placeholder="e.g. 9876543210">
         </div>
 
         <div class="form-group">
             <label for="address">Shop Address</label>
-            <textarea id="address" name="address" rows="3" placeholder="e.g. Shop #12, Main Market, Sector 4"></textarea>
+            <textarea id="address" name="address" rows="3" placeholder="e.g. Shop #12, Main Market, Sector 4">{{ shop.address|default:'' }}</textarea>
         </div>
 
         <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
             <h3 style="font-size: 1.05rem; color: #1a2530; margin-bottom: 0.5rem;">📍 Store Geolocation Coordinates</h3>
             <p style="color: #666; font-size: 0.88rem; margin-bottom: 1rem;">
-                Providing your latitude and longitude allows nearby customers to find your store and view distance calculation.
+                Providing your latitude and longitude allows nearby customers to find your store and view distance calculations.
             </p>
 
             <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
                 <div style="flex: 1; min-width: 140px;">
                     <label for="latitude" style="font-size: 0.88rem; font-weight: 600;">Latitude</label>
-                    <input type="number" step="any" id="latitude" name="latitude" placeholder="e.g. 28.6139" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;">
+                    <input type="number" step="any" id="latitude" name="latitude" value="{{ shop.latitude|default:'' }}" placeholder="e.g. 28.6139" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;">
                 </div>
                 <div style="flex: 1; min-width: 140px;">
                     <label for="longitude" style="font-size: 0.88rem; font-weight: 600;">Longitude</label>
-                    <input type="number" step="any" id="longitude" name="longitude" placeholder="e.g. 77.2090" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;">
+                    <input type="number" step="any" id="longitude" name="longitude" value="{{ shop.longitude|default:'' }}" placeholder="e.g. 77.2090" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;">
                 </div>
             </div>
 
@@ -59,7 +59,7 @@
         </div>
 
         <div style="display: flex; gap: 1rem; align-items: center;">
-            <button type="submit" class="btn">Create Shop</button>
+            <button type="submit" class="btn">Save Changes</button>
             <a href="{% url 'shopkeeper_dashboard' %}" class="btn btn-secondary">Cancel</a>
         </div>
     </form>

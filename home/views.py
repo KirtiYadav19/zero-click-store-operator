@@ -98,33 +98,110 @@ def shopkeeper_logout(request):
     return redirect('shopkeeper_login')
 
 
+from decouple import config
+
 @login_required(login_url='shopkeeper_login')
 def shopkeeper_create_shop(request):
     profile, _ = ShopkeeperProfile.objects.get_or_create(user=request.user)
-    
+
     if profile.shops.exists():
         messages.info(request, "You already have a shop registered.")
         return redirect('shopkeeper_dashboard')
+
+    google_maps_api_key = config('GOOGLE_MAPS_API_KEY', default='')
 
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
         address = request.POST.get('address', '').strip()
         phone = request.POST.get('phone', '').strip()
+        lat_str = request.POST.get('latitude', '').strip()
+        lng_str = request.POST.get('longitude', '').strip()
 
         if not name:
             messages.error(request, "Shop name is required.")
-            return render(request, 'shopkeeper/create_shop.html')
+            return render(request, 'shopkeeper/create_shop.html', {'google_maps_api_key': google_maps_api_key})
+
+        lat = None
+        lng = None
+        if lat_str and lng_str:
+            try:
+                lat_val = float(lat_str)
+                lng_val = float(lng_str)
+                if -90 <= lat_val <= 90 and -180 <= lng_val <= 180:
+                    lat = lat_val
+                    lng = lng_val
+                else:
+                    messages.error(request, "Latitude must be between -90 and 90, Longitude between -180 and 180.")
+                    return render(request, 'shopkeeper/create_shop.html', {'google_maps_api_key': google_maps_api_key})
+            except ValueError:
+                messages.error(request, "Coordinates must be valid numbers.")
+                return render(request, 'shopkeeper/create_shop.html', {'google_maps_api_key': google_maps_api_key})
 
         Shop.objects.create(
             shopkeeper=profile,
             name=name,
             address=address,
-            phone=phone
+            phone=phone,
+            latitude=lat,
+            longitude=lng
         )
         messages.success(request, "Shop created successfully!")
         return redirect('shopkeeper_dashboard')
 
-    return render(request, 'shopkeeper/create_shop.html')
+    return render(request, 'shopkeeper/create_shop.html', {'google_maps_api_key': google_maps_api_key})
+
+
+@login_required(login_url='shopkeeper_login')
+def shopkeeper_edit_shop(request):
+    shop = _get_user_shop(request.user)
+    if not shop:
+        messages.info(request, "Please create a shop first.")
+        return redirect('shopkeeper_create_shop')
+
+    google_maps_api_key = config('GOOGLE_MAPS_API_KEY', default='')
+
+    if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        address = request.POST.get('address', '').strip()
+        phone = request.POST.get('phone', '').strip()
+        lat_str = request.POST.get('latitude', '').strip()
+        lng_str = request.POST.get('longitude', '').strip()
+
+        if not name:
+            messages.error(request, "Shop name is required.")
+            return render(request, 'shopkeeper/edit_shop.html', {'shop': shop, 'google_maps_api_key': google_maps_api_key})
+
+        lat = None
+        lng = None
+        if lat_str and lng_str:
+            try:
+                lat_val = float(lat_str)
+                lng_val = float(lng_str)
+                if -90 <= lat_val <= 90 and -180 <= lng_val <= 180:
+                    lat = lat_val
+                    lng = lng_val
+                else:
+                    messages.error(request, "Latitude must be between -90 and 90, Longitude between -180 and 180.")
+                    return render(request, 'shopkeeper/edit_shop.html', {'shop': shop, 'google_maps_api_key': google_maps_api_key})
+            except ValueError:
+                messages.error(request, "Coordinates must be valid numbers.")
+                return render(request, 'shopkeeper/edit_shop.html', {'shop': shop, 'google_maps_api_key': google_maps_api_key})
+
+        shop.name = name
+        shop.address = address
+        shop.phone = phone
+        shop.latitude = lat
+        shop.longitude = lng
+        shop.save()
+
+        messages.success(request, "Shop details and location updated successfully!")
+        return redirect('shopkeeper_dashboard')
+
+    context = {
+        'shop': shop,
+        'google_maps_api_key': google_maps_api_key,
+    }
+    return render(request, 'shopkeeper/edit_shop.html', context)
 
 
 @login_required(login_url='shopkeeper_login')
@@ -138,12 +215,14 @@ def shopkeeper_dashboard(request):
     product_count = shop.products.count()
     order_count = shop.orders.count()
     recent_orders = shop.orders.all()[:5]
+    google_maps_api_key = config('GOOGLE_MAPS_API_KEY', default='')
 
     context = {
         'shop': shop,
         'product_count': product_count,
         'order_count': order_count,
         'recent_orders': recent_orders,
+        'google_maps_api_key': google_maps_api_key,
     }
     return render(request, 'shopkeeper/dashboard.html', context)
 
@@ -242,9 +321,25 @@ def shopkeeper_product_edit(request, pk):
 # --- CUSTOMER VIEWS ---
 
 def customer_home(request):
-    """Customer home page listing active shops."""
-    shops = services.get_active_shops()
-    return render(request, 'customer/home.html', {'shops': shops})
+    """Customer home page listing active shops sorted by distance if location provided."""
+    lat = request.GET.get('lat') or request.session.get('customer_lat')
+    lng = request.GET.get('lng') or request.session.get('customer_lng')
+
+    if request.GET.get('lat') and request.GET.get('lng'):
+        request.session['customer_lat'] = request.GET.get('lat')
+        request.session['customer_lng'] = request.GET.get('lng')
+        request.session.modified = True
+
+    shops_data = services.get_nearby_active_shops(lat, lng)
+    google_maps_api_key = config('GOOGLE_MAPS_API_KEY', default='')
+
+    context = {
+        'shops_data': shops_data,
+        'customer_lat': lat,
+        'customer_lng': lng,
+        'google_maps_api_key': google_maps_api_key,
+    }
+    return render(request, 'customer/home.html', context)
 
 
 def customer_shop_order(request, shop_id):

@@ -481,4 +481,135 @@ class TwoConversationalBugFixesTestCase(TestCase):
         self.assertIn("place kar du", res["reply"].lower())
 
 
+class LocationAndMultilingualSearchTestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='loc_shopkeeper', password='Password123!')
+        self.profile = ShopkeeperProfile.objects.create(user=self.user, phone='9990001112')
+
+        # Shop 1: Connaught Place, Delhi (28.6315, 77.2167)
+        self.shop_cp = Shop.objects.create(
+            shopkeeper=self.profile,
+            name='CP Kirana Store',
+            address='Connaught Place, Delhi',
+            latitude=Decimal('28.631500'),
+            longitude=Decimal('77.216700'),
+            is_active=True
+        )
+
+        # Shop 2: Gurgaon (28.4595, 77.0266) - approx 25-30 km away from CP
+        self.shop_ggn = Shop.objects.create(
+            shopkeeper=self.profile,
+            name='Gurgaon Retail Store',
+            address='DLF Cyber City, Gurgaon',
+            latitude=Decimal('28.459500'),
+            longitude=Decimal('77.026600'),
+            is_active=True
+        )
+
+        # Shop 3: Location disabled
+        self.shop_no_loc = Shop.objects.create(
+            shopkeeper=self.profile,
+            name='No Location Store',
+            address='Somewhere in India',
+            is_active=True
+        )
+
+        # Products in CP Kirana
+        self.coca_cola = Product.objects.create(
+            shop=self.shop_cp,
+            name='Coca Cola 750ml',
+            price=Decimal('40.00'),
+            unit='bottle',
+            stock=50,
+            is_active=True
+        )
+        self.surf_excel = Product.objects.create(
+            shop=self.shop_cp,
+            name='Surf Excel Easy Wash 1kg',
+            price=Decimal('140.00'),
+            unit='packet',
+            stock=30,
+            is_active=True
+        )
+        self.parle_g = Product.objects.create(
+            shop=self.shop_cp,
+            name='Parle-G Gold 100g',
+            price=Decimal('10.00'),
+            unit='packet',
+            stock=100,
+            is_active=True
+        )
+
+        self.client = Client()
+
+    def test_hindi_coca_cola_product_search(self):
+        """'कोका कोला', 'कोक', 'coke' all match 'Coca Cola 750ml'."""
+        res1 = services.search_product(self.shop_cp.id, "कोका कोला")
+        self.assertTrue(len(res1) > 0)
+        self.assertEqual(res1[0].name, "Coca Cola 750ml")
+
+        res2 = services.search_product(self.shop_cp.id, "कोक")
+        self.assertTrue(len(res2) > 0)
+        self.assertEqual(res2[0].name, "Coca Cola 750ml")
+
+        res3 = services.search_product(self.shop_cp.id, "coke")
+        self.assertTrue(len(res3) > 0)
+        self.assertEqual(res3[0].name, "Coca Cola 750ml")
+
+    def test_hindi_surf_excel_and_parle_g_search(self):
+        """'सर्फ' matches Surf Excel and 'पारले जी' matches Parle-G."""
+        res_surf = services.search_product(self.shop_cp.id, "सर्फ")
+        self.assertTrue(len(res_surf) > 0)
+        self.assertEqual(res_surf[0].name, "Surf Excel Easy Wash 1kg")
+
+        res_parle = services.search_product(self.shop_cp.id, "पारले जी")
+        self.assertTrue(len(res_parle) > 0)
+        self.assertEqual(res_parle[0].name, "Parle-G Gold 100g")
+
+    def test_haversine_distance_calculation(self):
+        """Haversine distance between Connaught Place and Gurgaon should be approx 28 km (28000m)."""
+        dist_meters = services.calculate_haversine_distance(28.6315, 77.2167, 28.4595, 77.0266)
+        self.assertIsNotNone(dist_meters)
+        self.assertGreater(dist_meters, 20000) # > 20 km
+        self.assertLess(dist_meters, 35000)    # < 35 km
+
+    def test_distance_formatting(self):
+        """Meters formatted cleanly as 'X m away' or 'Y km away'."""
+        self.assertEqual(services.format_distance(450), "450 m away")
+        self.assertEqual(services.format_distance(1250), "1.2 km away")
+        self.assertEqual(services.format_distance(2500), "2.5 km away")
+        self.assertIsNone(services.format_distance(None))
+
+    def test_nearby_shops_sorting(self):
+        """Customer located near CP (28.6300, 77.2150) should get CP store first."""
+        shops_data = services.get_nearby_active_shops(customer_lat=28.6300, customer_lng=77.2150)
+        self.assertTrue(len(shops_data) >= 2)
+        # First shop must be CP Kirana Store
+        self.assertEqual(shops_data[0]['shop'].name, "CP Kirana Store")
+        self.assertIsNotNone(shops_data[0]['distance_meters'])
+        self.assertLess(shops_data[0]['distance_meters'], 1000) # Less than 1 km
+
+    def test_shop_location_is_enabled(self):
+        """is_location_enabled returns True when latitude & longitude are present."""
+        self.assertTrue(self.shop_cp.is_location_enabled())
+        self.assertFalse(self.shop_no_loc.is_location_enabled())
+
+    def test_shopkeeper_edit_shop_coordinates(self):
+        """Shopkeeper can edit shop coordinates via POST."""
+        self.client.login(username='loc_shopkeeper', password='Password123!')
+        response = self.client.post('/shopkeeper/edit-shop/', {
+            'name': 'CP Kirana Store Updated',
+            'address': 'Inner Circle, CP',
+            'phone': '9990001112',
+            'latitude': '28.6320',
+            'longitude': '77.2170'
+        })
+        self.assertEqual(response.status_code, 302) # Redirects to dashboard
+        self.shop_cp.refresh_from_db()
+        self.assertEqual(self.shop_cp.name, 'CP Kirana Store Updated')
+        self.assertEqual(self.shop_cp.latitude, Decimal('28.632000'))
+        self.assertEqual(self.shop_cp.longitude, Decimal('77.217000'))
+
+
+
 

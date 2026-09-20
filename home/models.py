@@ -15,11 +15,16 @@ class Shop(models.Model):
     name = models.CharField(max_length=255)
     address = models.TextField(blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['name']
+
+    def is_location_enabled(self):
+        return self.latitude is not None and self.longitude is not None
 
     def __str__(self):
         return self.name

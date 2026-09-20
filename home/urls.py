@@ -19,6 +19,7 @@ urlpatterns = [
     path('shopkeeper/login/', views.shopkeeper_login, name='shopkeeper_login'),
     path('shopkeeper/logout/', views.shopkeeper_logout, name='shopkeeper_logout'),
     path('shopkeeper/create-shop/', views.shopkeeper_create_shop, name='shopkeeper_create_shop'),
+    path('shopkeeper/edit-shop/', views.shopkeeper_edit_shop, name='shopkeeper_edit_shop'),
     path('shopkeeper/dashboard/', views.shopkeeper_dashboard, name='shopkeeper_dashboard'),
     path('shopkeeper/orders/', views.shopkeeper_orders, name='shopkeeper_orders'),
     path('shopkeeper/products/', views.shopkeeper_products, name='shopkeeper_products'),

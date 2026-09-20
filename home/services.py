@@ -1,7 +1,11 @@
+import math
+import logging
 from decimal import Decimal
-from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 from .models import Shop, Product, Customer, Order, OrderItem
+
+log = logging.getLogger(__name__)
 
 def get_active_shops():
     """Retrieve all active shops."""
@@ -12,59 +16,162 @@ def get_shop_or_404(shop_id):
     return get_object_or_404(Shop, id=shop_id, is_active=True)
 
 # ---------------------------------------------------------------------------
+# Haversine Geographic Distance Calculation
+# ---------------------------------------------------------------------------
+def calculate_haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate geographic distance in meters between two lat/lon points using Haversine formula.
+    Returns distance in meters (float).
+    """
+    try:
+        R = 6371000.0  # Earth radius in meters
+        phi1 = math.radians(float(lat1))
+        phi2 = math.radians(float(lat2))
+        delta_phi = math.radians(float(lat2) - float(lat1))
+        delta_lambda = math.radians(float(lon2) - float(lon1))
+
+        a = (math.sin(delta_phi / 2.0) ** 2 +
+             math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2)
+        c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+        return R * c
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
+
+def format_distance(distance_meters):
+    """Format distance in meters: < 1000m -> '650 m away', >= 1000m -> '1.2 km away'."""
+    if distance_meters is None:
+        return None
+    if distance_meters < 1000:
+        return f"{int(round(distance_meters))} m away"
+    else:
+        km = distance_meters / 1000.0
+        return f"{km:.1f} km away"
+
+def get_nearby_active_shops(customer_lat=None, customer_lng=None):
+    """
+    Retrieve active shops sorted by geographic distance if customer coordinates are provided.
+    Shops without coordinates are listed after location-enabled shops.
+    Returns list of dicts: [{'shop': shop_obj, 'distance_meters': float|None, 'distance_text': str|None}]
+    """
+    shops = list(Shop.objects.filter(is_active=True).order_by('name'))
+
+    if customer_lat is None or customer_lng is None:
+        return [{'shop': s, 'distance_meters': None, 'distance_text': None} for s in shops]
+
+    try:
+        clat = float(customer_lat)
+        clng = float(customer_lng)
+    except (ValueError, TypeError):
+        return [{'shop': s, 'distance_meters': None, 'distance_text': None} for s in shops]
+
+    result = []
+    for shop in shops:
+        if shop.latitude is not None and shop.longitude is not None:
+            dist = calculate_haversine_distance(clat, clng, float(shop.latitude), float(shop.longitude))
+            dist_text = format_distance(dist)
+        else:
+            dist = None
+            dist_text = None
+
+        result.append({
+            'shop': shop,
+            'distance_meters': dist,
+            'distance_text': dist_text
+        })
+
+    # Sort location-enabled shops by distance ascending, followed by non-location enabled shops
+    result.sort(key=lambda x: (x['distance_meters'] is None, x['distance_meters'] or float('inf'), x['shop'].name))
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Multilingual Hindi/Hinglish → English product-name transliteration map.
 # Keys are lowercase Devanagari / Hinglish spellings.
 # Values are the English terms that typically appear in DB product names.
 # ---------------------------------------------------------------------------
 _TRANSLITERATION_MAP = {
+    # Coca Cola / Coke
+    "कोका कोला": "coca cola",
+    "कोका-कोला": "coca cola",
+    "कोकाकोला": "coca cola",
+    "कोका": "coca cola",
+    "कोक": "coca cola",
+    "coke": "coca cola",
+    "coca-cola": "coca cola",
+    "coca": "coca cola",
+    "cola": "coca cola",
+
     # Maggi / Noodles
     "मैगी": "maggi",
     "maggie": "maggi",
     "noodles": "maggi",
     "नूडल्स": "maggi",
+    "maggi": "maggi",
+
     # Atta / flour
     "आटा": "atta",
     "आटे": "atta",
     "aata": "atta",
     "chakki": "atta",
     "flour": "atta",
+    "atta": "atta",
+
     # Milk / Doodh
     "दूध": "milk",
     "doodh": "milk",
     "dudh": "milk",
+    "milk": "milk",
+
     # Salt / Namak
     "नमक": "salt",
     "namak": "salt",
-    # Biscuits
+    "salt": "salt",
+
+    # Biscuits / Parle-G
     "बिस्किट": "biscuit",
+    "बिस्कुट": "biscuit",
     "biskut": "biscuit",
     "biscuit": "biscuit",
     "biscuits": "biscuit",
+    "पारले": "parle-g",
+    "पारले जी": "parle-g",
+    "पारले-जी": "parle-g",
     "parle": "parle-g",
+    "parle-g": "parle-g",
+    "parleg": "parle-g",
+
     # Oil / Tel
     "तेल": "oil",
     "tel": "oil",
-    "sunflower": "sunflower",
-    "fortune": "fortune",
+    "sunflower": "oil",
+    "fortune": "oil",
+    "oil": "oil",
+
     # Sugar / Chini
     "चीनी": "sugar",
     "chini": "sugar",
+    "sugar": "sugar",
+
     # Rice / Chawal
     "चावल": "rice",
     "chawal": "rice",
     "chawl": "rice",
+    "rice": "rice",
+
     # Dal / Lentils
     "दाल": "dal",
+    "dal": "dal",
+
     # Tea / Chai
     "चाय": "tea",
     "chai": "tea",
-    # Coke / Cold Drink
-    "कोक": "coca cola",
-    "coke": "coca cola",
-    "cola": "coca cola",
-    # Detergent / Surf
+    "tea": "tea",
+
+    # Detergent / Surf Excel
     "सर्फ": "surf excel",
+    "सर्फ एक्सेल": "surf excel",
     "surf": "surf excel",
+    "surf excel": "surf excel",
     "detergent": "surf excel",
 }
 
@@ -72,33 +179,48 @@ _TRANSLITERATION_MAP = {
 def _expand_query_variants(query: str) -> list[str]:
     """
     Return an ordered list of search terms to try for a given query string.
-    Normalizes whitespace, trims punctuation, preserves case-insensitivity and script.
+    Normalizes whitespace, trims punctuation, handles Devanagari transliteration.
     """
     import re
     # Strip common punctuation while preserving word characters in Unicode
     cleaned = re.sub(r'[?.,!\-:;"\'\(\)]', ' ', query).strip()
     cleaned = re.sub(r'\s+', ' ', cleaned)
-    
+
     variants = []
     if cleaned:
         variants.append(cleaned)
-    
+
     ql = cleaned.lower()
     if ql and ql not in variants:
         variants.append(ql)
 
-    # Transliteration lookup for whole query
+    # Whole query transliteration lookup
     mapped = _TRANSLITERATION_MAP.get(ql)
     if mapped and mapped not in variants:
         variants.append(mapped)
 
-    # Token-level transliteration lookup
+    # Hyphen/space normalized lookup (e.g. "coca-cola" vs "coca cola")
+    normalized_spaces = ql.replace('-', ' ')
+    if normalized_spaces in _TRANSLITERATION_MAP:
+        m_space = _TRANSLITERATION_MAP[normalized_spaces]
+        if m_space not in variants:
+            variants.append(m_space)
+
+    # Token-level transliteration lookup & combination
     tokens = ql.split()
+    mapped_tokens = []
     for token in tokens:
         if token in _TRANSLITERATION_MAP:
             m_token = _TRANSLITERATION_MAP[token]
+            mapped_tokens.append(m_token)
             if m_token not in variants:
                 variants.append(m_token)
+        else:
+            mapped_tokens.append(token)
+
+    combined_mapped = " ".join(mapped_tokens)
+    if combined_mapped and combined_mapped not in variants:
+        variants.append(combined_mapped)
 
     return variants
 

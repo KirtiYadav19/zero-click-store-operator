@@ -47,14 +47,48 @@
 
 <!-- Store Selection -->
 <div class="card">
-    <div style="text-align: center; margin-bottom: 2rem;">
-        <h2 style="border: none; margin-bottom: 0.5rem; font-size: 1.6rem; color: #1a2530;">Choose a Nearby Store</h2>
+    <div style="text-align: center; margin-bottom: 1.5rem;">
+        <h2 style="border: none; margin-bottom: 0.5rem; font-size: 1.6rem; color: #1a2530;">📍 Nearby Stores</h2>
         <p style="color: #666; font-size: 1rem;">Select a shop below to start ordering with your AI-powered cashier.</p>
     </div>
 
-    {% if shops %}
+    <!-- Location Detection Controls -->
+    <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            {% if customer_lat and customer_lng %}
+                <span style="display: inline-flex; align-items: center; gap: 0.4rem; color: #27ae60; font-weight: 600; font-size: 0.95rem;">
+                    ✓ Location Detected
+                </span>
+                <span style="color: #666; font-size: 0.85rem; margin-left: 0.5rem;">
+                    ({{ customer_lat|floatformat:4 }}, {{ customer_lng|floatformat:4 }})
+                </span>
+            {% else %}
+                <span style="color: #555; font-size: 0.95rem;">
+                    📍 Enable location to see nearby stores sorted by distance.
+                </span>
+            {% endif %}
+            <div id="location-msg" style="color: #e74c3c; font-size: 0.85rem; margin-top: 0.25rem;"></div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <button type="button" id="btn-use-location" onclick="requestCustomerLocation()" class="btn" style="background: #27ae60; color: #fff; border: none;">
+                {% if customer_lat and customer_lng %}🔄 Refresh Location{% else %}📍 Use My Current Location{% endif %}
+            </button>
+            <button type="button" id="btn-toggle-map" onclick="toggleCustomerMap()" class="btn btn-secondary">
+                🗺️ View Map
+            </button>
+        </div>
+    </div>
+
+    <!-- Interactive Google Map (Optional / Toggleable) -->
+    <div id="customer-map-container" style="display: none; margin-bottom: 2rem;">
+        <div id="customer-map" style="width: 100%; height: 350px; border-radius: 10px; border: 1px solid #ccc; background: #e9ecef;"></div>
+    </div>
+
+    {% if shops_data %}
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem;">
-            {% for shop in shops %}
+            {% for item in shops_data %}
+                {% with shop=item.shop distance=item.distance_text %}
                 <div style="background: #fff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-direction: column; justify-content: space-between; transition: border-color 0.2s;"
                      onmouseover="this.style.borderColor='#27ae60'" onmouseout="this.style.borderColor='#e0e0e0'">
                     <div>
@@ -62,13 +96,29 @@
                             <h3 style="font-size: 1.2rem; color: #2c3e50;">{{ shop.name }}</h3>
                             <span class="badge badge-active">Open</span>
                         </div>
+                        
                         <p style="color: #666; font-size: 0.9rem; margin-bottom: 0.35rem;">📍 {{ shop.address|default:"Local Market" }}</p>
-                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 1.25rem;">📞 {{ shop.phone|default:"Available" }}</p>
+                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 0.35rem;">📞 {{ shop.phone|default:"Available" }}</p>
+
+                        {% if distance %}
+                            <div style="margin-top: 0.5rem; margin-bottom: 1rem;">
+                                <span style="background: #e8f8f5; color: #27ae60; border: 1px solid #a3e4d7; border-radius: 12px; padding: 0.25rem 0.75rem; font-size: 0.85rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                    📍 {{ distance }}
+                                </span>
+                            </div>
+                        {% else %}
+                            <div style="margin-top: 0.5rem; margin-bottom: 1rem;">
+                                <span style="background: #f4f6f7; color: #7f8c8d; border: 1px solid #e5e8e8; border-radius: 12px; padding: 0.25rem 0.75rem; font-size: 0.85rem; font-weight: 500;">
+                                    Store
+                                </span>
+                            </div>
+                        {% endif %}
                     </div>
                     <a href="{% url 'customer_shop_order' shop.id %}" class="btn" style="width: 100%; display: block; text-align: center;">
                         ORDER NOW →
                     </a>
                 </div>
+                {% endwith %}
             {% endfor %}
         </div>
     {% else %}
@@ -81,6 +131,112 @@
         </div>
     {% endif %}
 </div>
+
+<script>
+function requestCustomerLocation() {
+    const msgEl = document.getElementById('location-msg');
+    const btnEl = document.getElementById('btn-use-location');
+    msgEl.innerText = '';
+
+    if (!navigator.geolocation) {
+        msgEl.innerText = 'Geolocation is not supported by your browser.';
+        return;
+    }
+
+    btnEl.innerText = '⌛ Detecting Location...';
+    btnEl.disabled = true;
+
+    navigator.geolocation.getCurrentPosition(
+        function(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            window.location.href = `?lat=${lat}&lng=${lng}`;
+        },
+        function(error) {
+            btnEl.disabled = false;
+            btnEl.innerText = '📍 Use My Current Location';
+            if (error.code === error.PERMISSION_DENIED) {
+                msgEl.innerText = 'Location permission was denied. You can still browse all stores.';
+            } else {
+                msgEl.innerText = 'Unable to retrieve location. Please try again.';
+            }
+        },
+        { timeout: 10000, maximumAge: 60000 }
+    );
+}
+
+let customerMap = null;
+function toggleCustomerMap() {
+    const container = document.getElementById('customer-map-container');
+    if (container.style.display === 'none') {
+        container.style.display = 'block';
+        initCustomerMap();
+    } else {
+        container.style.display = 'none';
+    }
+}
+
+function initCustomerMap() {
+    if (customerMap) return;
+
+    const mapEl = document.getElementById('customer-map');
+    const custLat = {% if customer_lat %}{{ customer_lat }}{% else %}null{% endif %};
+    const custLng = {% if customer_lng %}{{ customer_lng }}{% else %}null{% endif %};
+
+    // Default center (India / Delhi if no lat/lng)
+    const centerLat = custLat || 28.6139;
+    const centerLng = custLng || 77.2090;
+
+    if (typeof google === 'object' && typeof google.maps === 'object') {
+        customerMap = new google.maps.Map(mapEl, {
+            center: { lat: centerLat, lng: centerLng },
+            zoom: custLat ? 13 : 11
+        });
+
+        if (custLat && custLng) {
+            new google.maps.Marker({
+                position: { lat: custLat, lng: custLng },
+                map: customerMap,
+                title: "Your Location",
+                icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+            });
+        }
+
+        {% for item in shops_data %}
+            {% if item.shop.latitude and item.shop.longitude %}
+                (function() {
+                    const shopMarker = new google.maps.Marker({
+                        position: { lat: {{ item.shop.latitude }}, lng: {{ item.shop.longitude }} },
+                        map: customerMap,
+                        title: "{{ item.shop.name }}"
+                    });
+
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `<div style="padding: 0.2rem;">
+                            <strong style="color:#1a2530;">{{ item.shop.name }}</strong><br>
+                            <span style="font-size:0.85rem; color:#666;">{{ item.shop.address|default:"" }}</span><br>
+                            {% if item.distance_text %}<strong style="color:#27ae60;">📍 {{ item.distance_text }}</strong><br>{% endif %}
+                            <a href="{% url 'customer_shop_order' item.shop.id %}" style="display:inline-block; margin-top:0.4rem; padding:0.25rem 0.6rem; background:#27ae60; color:#fff; text-decoration:none; border-radius:4px; font-size:0.8rem;">Order Now →</a>
+                        </div>`
+                    });
+
+                    shopMarker.addListener('click', function() {
+                        infoWindow.open(customerMap, shopMarker);
+                    });
+                })();
+            {% endif %}
+        {% endfor %}
+    } else {
+        mapEl.innerHTML = `<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#666; font-size:0.95rem; text-align:center; padding:1rem;">
+            🗺️ Google Maps preview unavailable (API Key configuration required). Store distance list is fully operational below.
+        </div>`;
+    }
+}
+</script>
+
+{% if google_maps_api_key %}
+<script src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places" async defer></script>
+{% endif %}
 
 <!-- Demo Quick-Start -->
 <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 1.25rem 1.5rem; margin-top: 0.5rem;">

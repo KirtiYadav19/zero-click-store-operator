@@ -4,21 +4,38 @@
 
 {% block content %}
 <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
         <h2>Shopkeeper Dashboard</h2>
         <span class="badge {% if shop.is_active %}badge-active{% else %}badge-inactive{% endif %}">
             {% if shop.is_active %}Active Store{% else %}Inactive Store{% endif %}
         </span>
     </div>
-    
+
     <p style="font-size: 1.1rem; color: #444; margin-bottom: 1.5rem;">
         Welcome, <strong>{{ request.user.username }}</strong>!
     </p>
 
     <div style="background: #f8f9fa; padding: 1.25rem; border-radius: 6px; border: 1px solid #e9ecef; margin-bottom: 1.5rem;">
-        <h3 style="color: #2c3e50; font-size: 1.2rem; margin-bottom: 0.5rem;">{{ shop.name }}</h3>
-        <p style="color: #666; font-size: 0.95rem;"><strong>Address:</strong> {{ shop.address|default:"Not specified" }}</p>
-        <p style="color: #666; font-size: 0.95rem;"><strong>Phone:</strong> {{ shop.phone|default:"Not specified" }}</p>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <h3 style="color: #2c3e50; font-size: 1.2rem; margin: 0;">{{ shop.name }}</h3>
+            <a href="{% url 'shopkeeper_edit_shop' %}" class="btn btn-secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">
+                ✏️ Edit Shop & Location
+            </a>
+        </div>
+        <p style="color: #666; font-size: 0.95rem; margin-bottom: 0.3rem;"><strong>Address:</strong> {{ shop.address|default:"Not specified" }}</p>
+        <p style="color: #666; font-size: 0.95rem; margin-bottom: 0.3rem;"><strong>Phone:</strong> {{ shop.phone|default:"Not specified" }}</p>
+
+        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed #dee2e6;">
+            {% if shop.is_location_enabled %}
+                <span style="color: #27ae60; font-size: 0.9rem; font-weight: 600;">
+                    📍 Store Location Configured ({{ shop.latitude|floatformat:4 }}, {{ shop.longitude|floatformat:4 }})
+                </span>
+            {% else %}
+                <span style="color: #e67e22; font-size: 0.9rem; font-weight: 500;">
+                    ⚠️ Location not configured. Set your store coordinates in <a href="{% url 'shopkeeper_edit_shop' %}" style="color: #27ae60; text-decoration: underline;">Edit Shop</a> for nearby customer discovery.
+                </span>
+            {% endif %}
+        </div>
     </div>
 
     <div class="grid-2">
