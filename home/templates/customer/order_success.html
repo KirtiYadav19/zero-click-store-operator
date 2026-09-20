@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block title %}Order Placed #{{ order.id }} - Zero-Click Store Operator{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 650px; text-align: center;">
+    <div style="background: #d4edda; color: #155724; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 1rem auto;">
+        ✓
+    </div>
+
+    <h2 style="border: none; margin-bottom: 0.2rem; color: #27ae60;">ORDER PLACED SUCCESSFULLY!</h2>
+    <p style="font-size: 1.25rem; font-weight: 700; color: #1a2530; margin-bottom: 0.5rem;">Order #{{ order.id }}</p>
+    <p style="color: #666; margin-bottom: 2rem;">Store: <strong>{{ order.shop.name }}</strong></p>
+
+    <!-- Order Items Breakdown -->
+    <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 1.25rem; text-align: left; margin-bottom: 2rem;">
+        <h4 style="font-size: 1rem; color: #2c3e50; margin-bottom: 0.75rem; border-bottom: 1px solid #dee2e6; padding-bottom: 0.4rem;">Order Summary</h4>
+        
+        <p style="font-size: 0.9rem; color: #555; margin-bottom: 0.75rem;">
+            <strong>Customer:</strong> {{ order.customer.name }} ({{ order.customer.phone }})
+        </p>
+
+        <ul style="list-style: none; display: grid; gap: 0.5rem; margin-bottom: 1rem;">
+            {% for item in items %}
+                <li style="display: flex; justify-content: space-between; font-size: 0.95rem; border-bottom: 1px dashed #eee; padding-bottom: 0.4rem;">
+                    <span>{{ item.quantity }} × {{ item.product.name }}</span>
+                    <span style="font-weight: 600;">₹{{ item.subtotal }}</span>
+                </li>
+            {% endfor %}
+        </ul>
+
+        <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; color: #1a2530; border-top: 2px solid #2c3e50; padding-top: 0.5rem;">
+            <span>TOTAL PAID / DUE</span>
+            <span>₹{{ order.total_amount }}</span>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 1rem; justify-content: center;">
+        <a href="{% url 'customer_home' %}" class="btn">Back to Stores</a>
+        <a href="{% url 'customer_shop_order' order.shop.id %}" class="btn btn-secondary">Order Again from {{ order.shop.name }}</a>
+    </div>
+</div>
+{% endblock %}

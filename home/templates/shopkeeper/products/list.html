@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block title %}Manage Products - {{ shop.name }}{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 900px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 2px solid #eee; padding-bottom: 0.75rem;">
+        <div>
+            <h2>Manage Inventory Products</h2>
+            <p style="color: #666; font-size: 0.9rem;">Store: <strong>{{ shop.name }}</strong></p>
+        </div>
+        <a href="{% url 'shopkeeper_product_add' %}" class="btn">+ Add Product</a>
+    </div>
+
+    {% if products %}
+        <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+            <thead>
+                <tr style="background: #f8f9fa; text-align: left; border-bottom: 2px solid #dee2e6;">
+                    <th style="padding: 0.75rem;">Product Name</th>
+                    <th style="padding: 0.75rem;">Price</th>
+                    <th style="padding: 0.75rem;">Unit</th>
+                    <th style="padding: 0.75rem;">Stock</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for product in products %}
+                    <tr style="border-bottom: 1px solid #e9ecef;">
+                        <td style="padding: 0.75rem; font-weight: 600; color: #2c3e50;">{{ product.name }}</td>
+                        <td style="padding: 0.75rem;">₹{{ product.price }}</td>
+                        <td style="padding: 0.75rem; color: #666;">{{ product.unit }}</td>
+                        <td style="padding: 0.75rem; font-weight: 600;">
+                            {% if product.stock > 0 %}
+                                <span style="color: #27ae60;">{{ product.stock }}</span>
+                            {% else %}
+                                <span style="color: #e74c3c;">Out of stock</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.75rem;">
+                            {% if product.is_active %}
+                                <span class="badge badge-active">Active</span>
+                            {% else %}
+                                <span class="badge badge-inactive">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 0.75rem; text-align: right;">
+                            <a href="{% url 'shopkeeper_product_edit' product.id %}" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">Edit</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div style="text-align: center; padding: 3rem 1rem; color: #777;">
+            <p style="font-size: 1.1rem; margin-bottom: 1rem;">No products added yet to {{ shop.name }}.</p>
+            <a href="{% url 'shopkeeper_product_add' %}" class="btn">+ Add First Product</a>
+        </div>
+    {% endif %}
+
+    <div style="margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1rem;">
+        <a href="{% url 'shopkeeper_dashboard' %}" style="color: #3498db; text-decoration: none; font-weight: 500;">← Back to Dashboard</a>
+    </div>
+</div>
+{% endblock %}

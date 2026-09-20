@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block title %}Ordering from {{ shop.name }} - Zero-Click Store Operator{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem; background: #fff; padding: 1.25rem 1.5rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h2 style="margin-bottom: 0.2rem; font-size: 1.4rem; color: #1a2530;">Ordering from: {{ shop.name }}</h2>
+        <p style="color: #666; font-size: 0.9rem;">📍 {{ shop.address|default:"Local Market" }} | 📞 {{ shop.phone|default:"Active" }}</p>
+    </div>
+    <a href="{% url 'customer_home' %}" class="btn btn-secondary btn-sm">Change Store</a>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; align-items: start;">
+
+    <!-- Left Column: Products & Chat Area Placeholder -->
+    <div>
+        <!-- AI Order Assistant Placeholder Box -->
+        <div class="card" style="margin-bottom: 1.5rem; border-left: 4px solid #3498db; background: #fafbfc;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <h3 style="font-size: 1.1rem; color: #2c3e50;">🤖 AI Order Assistant</h3>
+                <span class="badge badge-info" style="background:#e1f5fe; color:#0288d1;">Coming in Step 7</span>
+            </div>
+            <p style="color: #555; font-size: 0.95rem;">
+                Natural-language text & voice ordering (e.g. <em>"2 Maggi aur 1 Aata"</em>) will be active here in the next step. 
+                Use the quick catalog controls below to test cart building.
+            </p>
+        </div>
+
+        <!-- Available Products Catalog -->
+        <div class="card">
+            <h3 style="font-size: 1.2rem; color: #2c3e50; margin-bottom: 1rem; border-bottom: 1px solid #eee; padding-bottom: 0.5rem;">
+                Store Products
+            </h3>
+
+            {% if products %}
+                <div style="display: grid; gap: 1rem;">
+                    {% for product in products %}
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.85rem; border: 1px solid #e9ecef; border-radius: 6px; background: #fff;">
+                            <div>
+                                <h4 style="font-size: 1.05rem; color: #2c3e50; margin-bottom: 0.2rem;">{{ product.name }}</h4>
+                                <p style="color: #555; font-size: 0.9rem;">
+                                    <strong>₹{{ product.price }}</strong> per {{ product.unit }} 
+                                    <span style="color: #888; font-size: 0.85rem; margin-left: 0.5rem;">(Stock: {{ product.stock }})</span>
+                                </p>
+                            </div>
+                            {% if product.stock > 0 %}
+                                <form method="post" action="{% url 'customer_cart_add' shop.id %}" style="display: flex; align-items: center; gap: 0.5rem;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="product_id" value="{{ product.id }}">
+                                    <input type="number" name="quantity" value="1" min="1" max="{{ product.stock }}" style="width: 60px; padding: 0.4rem; border: 1px solid #ccc; border-radius: 4px; text-align: center;">
+                                    <button type="submit" class="btn btn-sm">+ Add</button>
+                                </form>
+                            {% else %}
+                                <span style="color: #e74c3c; font-weight: 600; font-size: 0.85rem;">Out of Stock</span>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p style="color: #777; font-size: 0.95rem;">No active products listed in this shop.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right Column: Current Order Summary -->
+    <div>
+        <div class="card" style="position: sticky; top: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 2px solid #eee; padding-bottom: 0.5rem;">
+                <h3 style="font-size: 1.25rem; color: #1a2530;">CURRENT ORDER</h3>
+                {% if cart.items %}
+                    <form method="post" action="{% url 'customer_cart_clear' shop.id %}">
+                        {% csrf_token %}
+                        <button type="submit" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:0.85rem;">Clear All</button>
+                    </form>
+                {% endif %}
+            </div>
+
+            {% if cart.items %}
+                <div style="display: grid; gap: 0.75rem; margin-bottom: 1.25rem;">
+                    {% for item in cart.items %}
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; border-bottom: 1px dashed #eee; padding-bottom: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 600; color: #2c3e50;">{{ item.name }}</div>
+                                <div style="color: #777; font-size: 0.85rem;">{{ item.quantity }} × ₹{{ item.price }}</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-weight: 600; color: #1a2530;">₹{{ item.subtotal }}</div>
+                                <form method="post" action="{% url 'customer_cart_update' shop.id %}" style="display: inline-block; margin-top: 0.2rem;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="product_id" value="{{ item.product_id }}">
+                                    <input type="hidden" name="quantity" value="0">
+                                    <button type="submit" style="background:none; border:none; color:#999; cursor:pointer; font-size:0.75rem;" title="Remove item">✕ Remove</button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-bottom: 1.25rem;">
+                    <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; color: #1a2530;">
+                        <span>TOTAL</span>
+                        <span>₹{{ cart.total }}</span>
+                    </div>
+                </div>
+
+                <a href="{% url 'customer_checkout' shop.id %}" class="btn" style="width: 100%; display: block; text-align: center;">PROCEED TO CHECKOUT →</a>
+            {% else %}
+                <div style="text-align: center; padding: 2rem 0; color: #888;">
+                    <p style="margin-bottom: 0.5rem;">Your cart is empty.</p>
+                    <p style="font-size: 0.85rem;">Add items from the store catalog to build your order.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Verification Checklist Preview Panel -->
+        <div class="card" style="margin-top: 1rem; padding: 1.25rem; font-size: 0.85rem;">
+            <h4 style="font-size: 0.95rem; color: #555; margin-bottom: 0.75rem;">AUTONOMOUS VERIFICATION</h4>
+            <ul style="list-style: none; display: grid; gap: 0.4rem; color: #666;">
+                <li>{% if cart.items %}✓{% else %}○{% endif %} Product Identification</li>
+                <li>{% if cart.items %}✓{% else %}○{% endif %} Database Stock Retrieval</li>
+                <li>{% if cart.items %}✓{% else %}○{% endif %} Session Cart Building</li>
+                <li>{% if cart.items %}✓{% else %}○{% endif %} Python Decimal Bill Calculation</li>
+                <li>○ Customer Confirmation</li>
+                <li>○ Atomic Order Commit</li>
+            </ul>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

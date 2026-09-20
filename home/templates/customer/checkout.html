@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block title %}Checkout - {{ shop.name }}{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 750px;">
+    <h2>Order Review & Confirmation</h2>
+    <p style="color: #666; margin-bottom: 1.5rem;">Ordering from: <strong>{{ shop.name }}</strong></p>
+
+    <!-- Cart Summary Table -->
+    <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 1.25rem; margin-bottom: 2rem;">
+        <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 1rem; border-bottom: 1px solid #dee2e6; padding-bottom: 0.5rem;">Items Summary</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 1px solid #ccc; font-size: 0.9rem; color: #555;">
+                    <th style="padding: 0.5rem 0;">Product</th>
+                    <th style="padding: 0.5rem 0; text-align: center;">Qty</th>
+                    <th style="padding: 0.5rem 0; text-align: right;">Unit Price</th>
+                    <th style="padding: 0.5rem 0; text-align: right;">Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in cart.items %}
+                    <tr style="border-bottom: 1px solid #eee; font-size: 0.95rem;">
+                        <td style="padding: 0.6rem 0; font-weight: 600;">{{ item.name }}</td>
+                        <td style="padding: 0.6rem 0; text-align: center;">{{ item.quantity }}</td>
+                        <td style="padding: 0.6rem 0; text-align: right;">₹{{ item.price }}</td>
+                        <td style="padding: 0.6rem 0; text-align: right; font-weight: 600;">₹{{ item.subtotal }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="display: flex; justify-content: space-between; margin-top: 1.25rem; padding-top: 0.75rem; border-top: 2px solid #2c3e50; font-size: 1.2rem; font-weight: 700;">
+            <span>TOTAL BILL:</span>
+            <span>₹{{ cart.total }}</span>
+        </div>
+    </div>
+
+    <!-- Customer Information Form -->
+    <form method="post" action="{% url 'customer_checkout' shop.id %}">
+        {% csrf_token %}
+        <h3 style="font-size: 1.1rem; color: #2c3e50; margin-bottom: 1rem;">Customer Details</h3>
+
+        <div class="form-group">
+            <label for="name">Your Name *</label>
+            <input type="text" id="name" name="name" required placeholder="e.g. Rahul Sharma">
+        </div>
+
+        <div class="form-group">
+            <label for="phone">Phone Number *</label>
+            <input type="text" id="phone" name="phone" required placeholder="e.g. 9876543210">
+        </div>
+
+        <div class="form-group">
+            <label for="address">Delivery Address</label>
+            <textarea id="address" name="address" rows="2" placeholder="e.g. House #45, Near Main Park"></textarea>
+        </div>
+
+        <div style="margin-top: 2rem; display: flex; gap: 1rem; align-items: center;">
+            <button type="submit" class="btn" style="flex: 2;">CONFIRM & PLACE ORDER →</button>
+            <a href="{% url 'customer_shop_order' shop.id %}" class="btn btn-secondary" style="flex: 1;">Continue Shopping</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

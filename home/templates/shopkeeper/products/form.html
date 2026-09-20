@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} - {{ shop.name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>{{ title }}</h2>
+    <p style="margin-bottom: 1.5rem; color: #666;">Store: <strong>{{ shop.name }}</strong></p>
+
+    <form method="post" action="">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="alert alert-error">
+                {% for error in form.non_field_errors %}
+                    <p>{{ error }}</p>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-group">
+            <label for="id_name">Product Name *</label>
+            {{ form.name }}
+            {% if form.name.errors %}
+                <div style="color: #e74c3c; font-size: 0.85rem; margin-top: 0.2rem;">{{ form.name.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="id_price">Price (₹) *</label>
+            {{ form.price }}
+            {% if form.price.errors %}
+                <div style="color: #e74c3c; font-size: 0.85rem; margin-top: 0.2rem;">{{ form.price.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="id_unit">Unit *</label>
+            {{ form.unit }}
+            <small style="color: #777; display: block; margin-top: 0.2rem;">Examples: packet, kg, liter, piece, bottle</small>
+            {% if form.unit.errors %}
+                <div style="color: #e74c3c; font-size: 0.85rem; margin-top: 0.2rem;">{{ form.unit.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="id_stock">Available Stock *</label>
+            {{ form.stock }}
+            {% if form.stock.errors %}
+                <div style="color: #e74c3c; font-size: 0.85rem; margin-top: 0.2rem;">{{ form.stock.errors.0 }}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem;">
+            {{ form.is_active }}
+            <label for="id_is_active" style="margin-bottom: 0; cursor: pointer;">Active (Available for customer orders)</label>
+        </div>
+
+        <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+            <button type="submit" class="btn">{% if is_edit %}Save Changes{% else %}Add Product{% endif %}</button>
+            <a href="{% url 'shopkeeper_products' %}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

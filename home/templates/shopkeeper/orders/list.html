@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block title %}Received Orders - {{ shop.name }}{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 900px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 2px solid #eee; padding-bottom: 0.75rem;">
+        <div>
+            <h2>Received Customer Orders</h2>
+            <p style="color: #666; font-size: 0.9rem;">Store: <strong>{{ shop.name }}</strong></p>
+        </div>
+        <a href="{% url 'shopkeeper_dashboard' %}" class="btn btn-secondary btn-sm">← Back to Dashboard</a>
+    </div>
+
+    {% if orders %}
+        <div style="display: grid; gap: 1.25rem;">
+            {% for order in orders %}
+                <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.25rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #eee; padding-bottom: 0.5rem;">
+                        <div>
+                            <span style="font-weight: 700; font-size: 1.1rem; color: #1a2530;">Order #{{ order.id }}</span>
+                            <span style="color: #888; font-size: 0.85rem; margin-left: 0.75rem;">{{ order.created_at|date:"M d, Y H:i" }}</span>
+                        </div>
+                        <span class="badge badge-active">{{ order.status|upper }}</span>
+                    </div>
+
+                    <p style="font-size: 0.95rem; color: #444; margin-bottom: 0.5rem;">
+                        <strong>Customer:</strong> {{ order.customer.name }} | 📞 {{ order.customer.phone }} | 📍 {{ order.customer.address|default:"No address specified" }}
+                    </p>
+
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="background: #f8f9fa; text-align: left; color: #555;">
+                                <th style="padding: 0.4rem;">Item</th>
+                                <th style="padding: 0.4rem; text-align: center;">Qty</th>
+                                <th style="padding: 0.4rem; text-align: right;">Unit Price</th>
+                                <th style="padding: 0.4rem; text-align: right;">Subtotal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in order.items.all %}
+                                <tr style="border-bottom: 1px solid #f0f0f0;">
+                                    <td style="padding: 0.4rem;">{{ item.product.name }}</td>
+                                    <td style="padding: 0.4rem; text-align: center;">{{ item.quantity }}</td>
+                                    <td style="padding: 0.4rem; text-align: right;">₹{{ item.unit_price }}</td>
+                                    <td style="padding: 0.4rem; text-align: right; font-weight: 600;">₹{{ item.subtotal }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid #eee;">
+                        <span style="color: #666; font-size: 0.9rem;">Total Amount</span>
+                        <span style="font-size: 1.15rem; font-weight: 700; color: #27ae60;">₹{{ order.total_amount }}</span>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div style="text-align: center; padding: 3rem 1rem; color: #777;">
+            <p style="font-size: 1.1rem;">No orders received yet for {{ shop.name }}.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

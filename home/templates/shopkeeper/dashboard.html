@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+
+{% block title %}Shopkeeper Dashboard - Zero-Click Store Operator{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h2>Shopkeeper Dashboard</h2>
+        <span class="badge {% if shop.is_active %}badge-active{% else %}badge-inactive{% endif %}">
+            {% if shop.is_active %}Active Store{% else %}Inactive Store{% endif %}
+        </span>
+    </div>
+    
+    <p style="font-size: 1.1rem; color: #444; margin-bottom: 1.5rem;">
+        Welcome, <strong>{{ request.user.username }}</strong>!
+    </p>
+
+    <div style="background: #f8f9fa; padding: 1.25rem; border-radius: 6px; border: 1px solid #e9ecef; margin-bottom: 1.5rem;">
+        <h3 style="color: #2c3e50; font-size: 1.2rem; margin-bottom: 0.5rem;">{{ shop.name }}</h3>
+        <p style="color: #666; font-size: 0.95rem;"><strong>Address:</strong> {{ shop.address|default:"Not specified" }}</p>
+        <p style="color: #666; font-size: 0.95rem;"><strong>Phone:</strong> {{ shop.phone|default:"Not specified" }}</p>
+    </div>
+
+    <div class="grid-2">
+        <div class="stat-box">
+            <span style="color: #666; font-weight: 600;">Total Products</span>
+            <h3>{{ product_count }}</h3>
+            <a href="{% url 'shopkeeper_products' %}" class="btn" style="margin-top: 1rem; width: 100%; text-align: center;">Manage Products</a>
+        </div>
+        <div class="stat-box">
+            <span style="color: #666; font-weight: 600;">Total Orders</span>
+            <h3>{{ order_count }}</h3>
+            <a href="{% url 'shopkeeper_orders' %}" class="btn btn-secondary" style="margin-top: 1rem; width: 100%; text-align: center;">View Orders</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
