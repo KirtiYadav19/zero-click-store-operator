@@ -346,11 +346,250 @@ def customer_order_success(request, order_id):
     """Order confirmation success page."""
     order = get_object_or_404(Order, id=order_id)
     items = order.items.all().select_related('product')
+
+    # Store order authorization in session
+    request.session['last_order_id'] = order.id
+    placed_orders = request.session.get('placed_order_ids', [])
+    if order.id not in placed_orders:
+        placed_orders.append(order.id)
+    request.session['placed_order_ids'] = placed_orders
+    request.session.modified = True
+
     context = {
         'order': order,
         'items': items,
     }
     return render(request, 'customer/order_success.html', context)
+
+
+def order_receipt_pdf(request, order_id):
+    """
+    Generate and stream downloadable PDF receipt for a confirmed order.
+    Enforces strict authorization: session must match order_id or request.user must be the shopkeeper.
+    """
+    try:
+        order = Order.objects.select_related('shop', 'customer').filter(id=order_id).first()
+        if not order:
+            return HttpResponse("Order not found.", status=404)
+
+        # Security & Authorization check
+        is_authorized = False
+
+        # 1. Shopkeeper of this order's shop
+        if request.user.is_authenticated:
+            profile = getattr(request.user, 'profile', None)
+            if profile and profile.shops.filter(id=order.shop.id).exists():
+                is_authorized = True
+
+        # 2. Customer session authorization
+        if not is_authorized:
+            last_order_id = request.session.get('last_order_id')
+            placed_order_ids = request.session.get('placed_order_ids', [])
+            if last_order_id == order.id or order.id in placed_order_ids:
+                is_authorized = True
+
+        if not is_authorized:
+            return HttpResponseForbidden("Receipt could not be accessed. You are not authorized to view this receipt.")
+
+        # Build PDF using ReportLab
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36
+        )
+
+        styles = getSampleStyleSheet()
+
+        # Custom styles
+        shop_title_style = ParagraphStyle(
+            'ShopTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=18,
+            alignment=1, # Center
+            spaceAfter=4,
+            textColor=colors.HexColor('#1A2530')
+        )
+
+        shop_sub_style = ParagraphStyle(
+            'ShopSub',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            alignment=1, # Center
+            textColor=colors.HexColor('#555555'),
+            spaceAfter=2
+        )
+
+        heading2_style = ParagraphStyle(
+            'ReceiptHeading',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=14,
+            alignment=1, # Center
+            textColor=colors.HexColor('#27AE60'),
+            spaceBefore=10,
+            spaceAfter=10
+        )
+
+        normal_style = ParagraphStyle(
+            'ReceiptNormal',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            textColor=colors.HexColor('#333333'),
+            leading=14
+        )
+
+        bold_style = ParagraphStyle(
+            'ReceiptBold',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=10,
+            textColor=colors.HexColor('#1A2530'),
+            leading=14
+        )
+
+        story = []
+
+        # 1. Shop Header
+        shop = order.shop
+        shop_name = shop.name.upper() if shop else "STORE RECEIPT"
+        story.append(Paragraph(shop_name, shop_title_style))
+        if shop and shop.address:
+            story.append(Paragraph(shop.address, shop_sub_style))
+        if shop and shop.phone:
+            story.append(Paragraph(f"Phone: {shop.phone}", shop_sub_style))
+
+        story.append(Spacer(1, 10))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CCCCCC'), spaceAfter=10))
+
+        # 2. Receipt Subtitle & Order Details
+        story.append(Paragraph("ORDER RECEIPT", heading2_style))
+
+        order_date_str = order.created_at.strftime('%d %b %Y, %I:%M %p')
+        info_data = [
+            [
+                Paragraph(f"<b>Order ID:</b> #{order.id}", normal_style),
+                Paragraph(f"<b>Date:</b> {order_date_str}", normal_style)
+            ]
+        ]
+
+        customer = order.customer
+        cust_name = customer.name if customer and customer.name else "Customer"
+        cust_phone = customer.phone if customer and customer.phone else "N/A"
+        cust_addr = customer.address if customer and customer.address else ""
+
+        info_data.append([
+            Paragraph(f"<b>Customer:</b> {cust_name}", normal_style),
+            Paragraph(f"<b>Phone:</b> {cust_phone}", normal_style)
+        ])
+        if cust_addr:
+            info_data.append([
+                Paragraph(f"<b>Address:</b> {cust_addr}", normal_style),
+                Paragraph("", normal_style)
+            ])
+
+        info_table = Table(info_data, colWidths=[270, 270])
+        info_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(info_table)
+        story.append(Spacer(1, 12))
+
+        # 3. Items Table
+        items = order.items.all().select_related('product')
+
+        table_data = [
+            [
+                Paragraph("<b>ITEM</b>", bold_style),
+                Paragraph("<b>QTY</b>", bold_style),
+                Paragraph("<b>PRICE</b>", bold_style),
+                Paragraph("<b>SUBTOTAL</b>", bold_style)
+            ]
+        ]
+
+        for item in items:
+            prod_name = item.product.name if item.product else "Product"
+            table_data.append([
+                Paragraph(prod_name, normal_style),
+                Paragraph(str(item.quantity), normal_style),
+                Paragraph(f"₹{item.unit_price:.2f}", normal_style),
+                Paragraph(f"₹{item.subtotal:.2f}", normal_style)
+            ])
+
+        items_table = Table(table_data, colWidths=[240, 60, 120, 120])
+        items_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#F8F9FA')),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E9ECEF')),
+            ('ALIGN', (1,0), (1,-1), 'CENTER'),
+            ('ALIGN', (2,0), (-1,-1), 'RIGHT'),
+        ]))
+        story.append(items_table)
+        story.append(Spacer(1, 12))
+
+        # 4. Total Amount
+        total_data = [
+            [
+                Paragraph("<b>TOTAL AMOUNT</b>", ParagraphStyle('TLabel', parent=bold_style, fontSize=12)),
+                Paragraph(f"<b>₹{order.total_amount:.2f}</b>", ParagraphStyle('TVal', parent=bold_style, fontSize=12, alignment=2, textColor=colors.HexColor('#1A2530')))
+            ]
+        ]
+        total_table = Table(total_data, colWidths=[360, 180])
+        total_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#E8F8F5')),
+            ('TOPPADDING', (0,0), (-1,-1), 8),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+            ('LEFTPADDING', (0,0), (-1,-1), 10),
+            ('RIGHTPADDING', (0,0), (-1,-1), 10),
+            ('GRID', (0,0), (-1,-1), 1, colors.HexColor('#27AE60')),
+        ]))
+        story.append(total_table)
+        story.append(Spacer(1, 20))
+
+        # 5. Footer / Status
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#CCCCCC'), spaceAfter=15))
+        status_style = ParagraphStyle(
+            'StatusText',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            alignment=1,
+            textColor=colors.HexColor('#27AE60')
+        )
+        thanks_style = ParagraphStyle(
+            'ThanksText',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            alignment=1,
+            textColor=colors.HexColor('#555555'),
+            spaceBefore=4
+        )
+        story.append(Paragraph("✓ ORDER CONFIRMED", status_style))
+        story.append(Paragraph("Thank you for shopping with us!", thanks_style))
+
+        # Build document
+        doc.build(story)
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="order_{order.id}_receipt.pdf"'
+        return response
+
+    except Exception as e:
+        logger.exception("Error generating receipt PDF for order_id=%s: %s", order_id, str(e))
+        return HttpResponse("Receipt could not be generated. Please try again.", status=500)
+
 
 
 def customer_ai_chat(request, shop_id):

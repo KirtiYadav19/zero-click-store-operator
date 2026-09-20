@@ -205,3 +205,71 @@ class Prompt16AvailabilityVsOrderingTestCase(TestCase):
         
         res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "2 aur add kar do")
         self.assertEqual(res["cart"]["items"][0]["quantity"], 3)
+
+
+class Prompt18DownloadReceiptTestCase(TestCase):
+    def setUp(self):
+        self.shopkeeper_user = User.objects.create_user(username='receipt_shopkeeper', password='Password123!')
+        self.profile = ShopkeeperProfile.objects.create(user=self.shopkeeper_user, phone='9876543210')
+        self.shop = Shop.objects.create(
+            shopkeeper=self.profile,
+            name='Rahul General Store',
+            address='Main Market',
+            phone='9999999999'
+        )
+        self.p1 = Product.objects.create(
+            shop=self.shop,
+            name='Maggi 2-Minute Noodles',
+            price=Decimal('15.00'),
+            unit='packet',
+            stock=20,
+            is_active=True
+        )
+        self.p2 = Product.objects.create(
+            shop=self.shop,
+            name='Amul Milk 1L',
+            price=Decimal('65.00'),
+            unit='packet',
+            stock=15,
+            is_active=True
+        )
+
+        self.customer = Customer.objects.create(name='Ankit', phone='9876543210', address='123 Main St')
+        self.order = Order.objects.create(shop=self.shop, customer=self.customer, total_amount=Decimal('95.00'), status='confirmed')
+        OrderItem.objects.create(order=self.order, product=self.p1, quantity=2, unit_price=Decimal('15.00'), subtotal=Decimal('30.00'))
+        OrderItem.objects.create(order=self.order, product=self.p2, quantity=1, unit_price=Decimal('65.00'), subtotal=Decimal('65.00'))
+
+        self.authorized_client = Client()
+        session = self.authorized_client.session
+        session['last_order_id'] = self.order.id
+        session['placed_order_ids'] = [self.order.id]
+        session.save()
+
+        self.unauthorized_client = Client()
+
+    def test_authorized_customer_receipt_download(self):
+        """Authorized customer session can download PDF receipt."""
+        response = self.authorized_client.get(f'/order/{self.order.id}/receipt/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn(f'attachment; filename="order_{self.order.id}_receipt.pdf"', response['Content-Disposition'])
+        self.assertGreater(len(response.content), 1000)
+
+    def test_unauthorized_customer_receipt_access_denied(self):
+        """Unauthorized customer cannot download another customer's receipt (HTTP 403)."""
+        response = self.unauthorized_client.get(f'/order/{self.order.id}/receipt/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_shopkeeper_can_download_receipt(self):
+        """Shopkeeper of the shop can download any receipt for their shop."""
+        shopkeeper_client = Client()
+        shopkeeper_client.login(username='receipt_shopkeeper', password='Password123!')
+        response = shopkeeper_client.get(f'/order/{self.order.id}/receipt/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_nonexistent_order_receipt_404(self):
+        """Non-existent order ID returns 404 Not Found."""
+        response = self.authorized_client.get('/order/999999/receipt/')
+        self.assertEqual(response.status_code, 404)
+

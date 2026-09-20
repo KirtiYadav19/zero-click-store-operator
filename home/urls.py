@@ -12,6 +12,7 @@ urlpatterns = [
     path('shop/<int:shop_id>/cart/clear/', views.customer_cart_clear, name='customer_cart_clear'),
     path('shop/<int:shop_id>/checkout/', views.customer_checkout, name='customer_checkout'),
     path('order/<int:order_id>/success/', views.customer_order_success, name='customer_order_success'),
+    path('order/<int:order_id>/receipt/', views.order_receipt_pdf, name='order_receipt_pdf'),
 
     # Shopkeeper routes
     path('shopkeeper/register/', views.shopkeeper_register, name='shopkeeper_register'),

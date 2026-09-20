@@ -35,7 +35,8 @@
         </div>
     </div>
 
-    <div style="display: flex; gap: 1rem; justify-content: center;">
+    <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+        <a href="{% url 'order_receipt_pdf' order.id %}" class="btn" style="background: #27ae60; color: white; text-decoration: none; font-weight: 600;">↓ Download Receipt</a>
         <a href="{% url 'customer_home' %}" class="btn">Back to Stores</a>
         <a href="{% url 'customer_shop_order' order.shop.id %}" class="btn btn-secondary">Order Again from {{ order.shop.name }}</a>
     </div>
