@@ -16,29 +16,27 @@ Your goal is to assist customers with natural language ordering in English, Hind
 
 CRITICAL FUNCTION CALLING AND CONTEXT RULES:
 1. When calling search_product(query), query MUST contain ONLY the product name or short product search phrase (e.g. "rice", "मैगी", "Maggi", "aata", "milk").
-   DO NOT pass full sentences or conversational phrases (like "add quantity 2", "make it 2", "isko 2 kar do", "Do you have rice?").
+   DO NOT pass full sentences or conversational phrases (like "Maggi hai ya nahi?", "add quantity 2", "make it 2", "Do you have rice?").
 
-2. CONVERSATIONAL FOLLOW-UPS & CART MUTATIONS:
-   - SET QUANTITY ("add quantity 2", "make it 3", "isko 2 kar do", "दो कर दो"):
-     Use the referenced product from CURRENT CART / LAST REFERENCED PRODUCT.
-     Call update_cart_quantity(product_id, quantity) to SET the total quantity.
-   - INCREASE QUANTITY ("add 2 more", "2 aur add kar do", "ek aur"):
-     Call add_to_cart(product_id, quantity) to add more to existing quantity.
+2. STRICT SEPARATION OF INTENTS:
+   - CHECK AVAILABILITY / STOCK ("Maggi hai ya nahi?", "क्या मैगी है या नहीं?", "Is Maggi available?", "Rice stock mein hai?"):
+     Call search_product(query="Maggi") or check_stock. Answer with available stock.
+     DO NOT CALL add_to_cart! DO NOT CALL place_order! Cart must remain unchanged!
+   - CHECK PRICE ("Rice kitne ka hai?", "चावल कितने का है?", "Price of Maggi?"):
+     Call search_product(query="rice"). Answer with product price. DO NOT CALL add_to_cart!
+   - ADD TO CART ("2 kg rice de do", "एक किलो चावल दे दो", "Maggi add kar do", "2 packet"):
+     Call search_product followed by add_to_cart.
+   - CONVERSATIONAL QUANTITY FOLLOW-UP ("add quantity 2", "make it 3", "isko 2 kar do", "दो कर दो"):
+     Call update_cart_quantity(product_id, quantity) to SET total quantity.
+   - ADD MORE ("add 2 more", "2 aur add kar do", "ek aur"):
+     Call add_to_cart(product_id, quantity) to add to existing quantity.
    - REMOVE ITEM ("isko hata do", "remove maggi"):
      Call remove_from_cart(product_id).
-
-3. DISTINGUISH INTENTS CAREFULLY:
-   - CHECK AVAILABILITY / STOCK ("क्या हमारे पास rice है?", "Rice stock mein hai?", "Is Maggi in stock?"):
-     Call search_product(query="rice") or check_stock. Answer with stock count. DO NOT call add_to_cart unless asked!
-   - CHECK PRICE ("Rice kitne ka hai?", "चावल कितने का है?", "Price of Maggi?"):
-     Call search_product(query="rice"). Answer with product price. DO NOT call add_to_cart!
-   - ADD TO CART ("2 kg rice de do", "एक किलो चावल दे दो", "Maggi add kar do"):
-     Call search_product followed by add_to_cart.
    - ORDER CONFIRMATION ("haan", "yes", "confirm", "order kar do"):
-     Call place_order.
+     Call place_order only when cart has items and customer explicitly confirms.
 
-4. Never invent prices or stock numbers. Always use backend tool output.
-5. Match customer language style naturally.
+3. Never invent prices or stock numbers. Always use backend tool output.
+4. Match customer language style naturally.
 """
 
 def _execute_tool(session, shop_id, tool_name, tool_args):
@@ -131,6 +129,9 @@ NUMBER_WORDS = {
 
 # MULTI-WORD INTENT PHRASES (to remove from product query extraction)
 MULTIWORD_INTENT_PHRASES = [
+    "hai ya nahi", "hai ya nahi?", "available hai ya nahi", "stock mein hai ya nahi",
+    "available or not", "in stock or not", "ya nahi", "या नहीं", "milti hai kya", "milta hai kya",
+    "milti hai", "milta hai", "kya milti hai", "kya milta hai", "does this store have",
     "do we have", "do you have", "is there", "can i get", "i need", "give me", "show me",
     "what is the price of", "what is the price", "price of", "cost of", "rate of", "how much is", "how much",
     "in stock", "stock mein hai", "stock mein", "stock me", "available hai", "kya hamare paas",
@@ -142,16 +143,16 @@ MULTIWORD_INTENT_PHRASES = [
 # SINGLE WORD FILLERS (to remove from product query extraction)
 SINGLEWORD_FILLERS = set([
     # Hindi Devanagari
-    "क्या", "हमारे", "पास", "है", "स्टॉक", "में", "उपलब्ध", "मिलेगा", "मिलेगी", "चाहिए",
+    "क्या", "हमारे", "आपके", "पास", "है", "स्टॉक", "में", "उपलब्ध", "मिलेगा", "मिलेगी", "चाहिए",
     "दे", "दो", "दिखाओ", "कितना", "कितने", "का", "की", "के", "रेट", "भाव", "रखते", "हो", "लोग",
-    "किलो", "लीटर", "पैकेट", "ग्राम", "रुपये", "रुपए", "बताओ", "बताइए",
+    "किलो", "लीटर", "पैकेट", "ग्राम", "रुपये", "रुपए", "बताओ", "बताइए", "नहीं", "या", "मिलता", "मिलती",
 
     # English / Hinglish
     "do", "we", "you", "have", "is", "there", "available", "stock", "can", "i", "get",
     "need", "give", "me", "show", "how", "much", "what", "the", "price", "cost", "rate",
     "of", "hai", "kya", "dedo", "add", "also", "bhi", "mein", "me", "pakka", "batao", "bataiye",
     "milega", "milegi", "kitne", "kitna", "kg", "kilo", "litre", "liter", "l", "packet", "packets",
-    "rs", "rupees", "rupee", "aur", "and", "please"
+    "rs", "rupees", "rupee", "aur", "and", "please", "nahi", "ya", "or", "not", "store"
 ])
 
 # WORDS THAT NEVER SHOULD BE SEARCHED AS PRODUCT NAMES
@@ -399,19 +400,27 @@ def _rule_based_nlp_handler(session, shop_id, text):
                     "step": "Cart Building"
                 }
 
-    # 6. Check for Stock or Price Query Intent (Informational ONLY, NO Cart Mutation)
-    is_add_action = any(w in text_lower or w in text for w in ["add", "dedo", "de do", "chahiye", "चाहिए", "दे दो", "buy", "order", "lao", "ले लो"]) and not any(w in text_lower for w in ["stock", "price", "rate", "kitne", "available", "उपलब्ध", "भाव"])
+    # 6. Check for Stock, Price, or Availability Query Intent (Informational ONLY, NO Cart Mutation)
+    # Explicit ordering words:
+    ordering_words = ["de do", "dedo", "dena", "add", "daal do", "daalo", "दे दो", "डाल दो", "ले लो", "buy", "chahiye", "चाहिए"]
+    has_ordering_word = any(w in text_lower or w in text for w in ordering_words)
 
-    is_price_check = not is_add_action and any(word in text_lower or word in text for word in [
+    # Availability / Yes-No query phrases
+    availability_phrases = [
+        "hai ya nahi", "ya nahi", "या नहीं", "available", "उपलब्ध", "stock", "स्टॉक",
+        "do you have", "is there", "does this store have", "can i get", "is it available",
+        "hai kya", "है क्या", "hai?", "है?", "milegi", "milega", "मिलेगी", "मिलेगा",
+        "milti hai", "milta hai", "मिलती है", "मिलता है", "hai", "है"
+    ]
+
+    is_price_check = not has_ordering_word and any(word in text_lower or word in text for word in [
         "kitne ki", "kitne ka", "kitna", "price", "rate", "cost", "कितने की", "कितने का", "कितना", "रेट", "भाव", "how much", "what is the price"
     ])
 
-    is_stock_check = not is_add_action and not is_price_check and any(word in text_lower or word in text for word in [
-        "stock", "available", "उपलब्ध", "स्टॉक", "मिलेगा", "मिलेगी", "रखते हो", "do you have", "do we have", "is there", "hai kya", "है क्या", "है?", "have"
-    ])
+    is_stock_or_availability = not has_ordering_word and not is_price_check and any(word in text_lower or word in text for word in availability_phrases)
 
     # Follow-up stock/price check on previous item (e.g. "kitna stock hai?", "kitne ki hai?")
-    if (is_stock_check or is_price_check) and not _extract_product_name(text):
+    if (is_stock_or_availability or is_price_check) and not _extract_product_name(text):
         target_prod = _get_referenced_product(session, shop_id, cart)
         if target_prod:
             if is_price_check:
@@ -420,9 +429,9 @@ def _rule_based_nlp_handler(session, shop_id, text):
                     "cart": cart,
                     "step": "Database Retrieval"
                 }
-            elif is_stock_check:
+            elif is_stock_or_availability:
                 if target_prod.stock > 0:
-                    reply = f"Haan! {target_prod.name} available hai. Abhi {target_prod.stock} {target_prod.unit}s stock mein hain."
+                    reply = f"Yes, {target_prod.name} available hai. Abhi {target_prod.stock} {target_prod.unit}s stock mein hain. Agar chahiye toh quantity bata dijiye."
                 else:
                     reply = f"Sorry, {target_prod.name} abhi out of stock hai."
                 return {
@@ -433,7 +442,7 @@ def _rule_based_nlp_handler(session, shop_id, text):
 
     # 7. Check for Multi-Product Addition (e.g. "2 kg rice aur 1 litre milk de do")
     parts = re.split(r'\s+(?:aur|and|,|\+)\s+', text, flags=re.IGNORECASE)
-    if len(parts) > 1 and is_add_action:
+    if len(parts) > 1 and has_ordering_word:
         added_summaries = []
         for part in parts:
             p_qty = _extract_number(part) or 1
@@ -458,6 +467,24 @@ def _rule_based_nlp_handler(session, shop_id, text):
 
     # 8. Single Product Extraction & DB Lookup
     product_query = _extract_product_name(text)
+
+    # Check if user just specified a quantity follow-up for the last referenced item (e.g. "2 packet", "2", "दो पैकेट")
+    num_val = _extract_number(text)
+    if (not product_query or product_query in CONVERSATIONAL_KEYWORDS) and num_val is not None:
+        target_prod = _get_referenced_product(session, shop_id, cart)
+        if target_prod:
+            succ, m = services.add_to_cart(session, shop_id, target_prod.id, num_val)
+            updated_cart = services.get_cart(session, shop_id)
+            session['last_referenced_product_id'] = target_prod.id
+            if succ:
+                reply = f"Added {num_val} × {target_prod.name} (₹{target_prod.price * Decimal(num_val)}) to cart. Total: ₹{updated_cart['total']}. Aur kuch chahiye?"
+            else:
+                reply = m
+            return {
+                "reply": reply,
+                "cart": updated_cart,
+                "step": "Bill Calculation"
+            }
 
     # If query is empty or in conversational keywords, try referencing last item
     if not product_query or product_query in CONVERSATIONAL_KEYWORDS:
@@ -497,10 +524,10 @@ def _rule_based_nlp_handler(session, shop_id, text):
             "step": "Database Retrieval"
         }
 
-    # Handle Stock Check Query (Informational ONLY, NO CART ADDITION)
-    if is_stock_check:
+    # Handle Stock / Availability Check Query (Informational ONLY, NO CART ADDITION)
+    if is_stock_or_availability:
         if product.stock > 0:
-            reply = f"Haan! {product.name} available hai. Abhi {product.stock} {product.unit}s stock mein hain."
+            reply = f"Yes, {product.name} available hai. Abhi {product.stock} {product.unit}s stock mein hain. Agar chahiye toh quantity bata dijiye."
         else:
             reply = f"Sorry, {product.name} abhi out of stock hai."
 
