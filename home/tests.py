@@ -380,3 +380,105 @@ class CriticalOrderConfirmationVsQuantityTestCase(TestCase):
         self.assertEqual(Order.objects.filter(shop=self.shop).count(), 0)
 
 
+class TwoConversationalBugFixesTestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='two_bugs_shopkeeper', password='Password123!')
+        self.profile = ShopkeeperProfile.objects.create(user=self.user, phone='9988112233')
+        self.shop = Shop.objects.create(shopkeeper=self.profile, name='Quick Kirana Store')
+        self.maggi = Product.objects.create(
+            shop=self.shop,
+            name='Maggi 2-Minute Noodles',
+            price=Decimal('15.00'),
+            unit='packet',
+            stock=5,
+            is_active=True
+        )
+        self.client = Client()
+
+    def test_bug1_1_hi_kar_do(self):
+        """TEST 1: '1 hi kar do' sets quantity to 1 without searching for 'hi kar'."""
+        session = self.client.session
+        session['last_referenced_product_id'] = self.maggi.id
+        session.save()
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "1 hi kar do")
+
+        self.assertNotIn("hamare store", res["reply"].lower()) # Must NOT say "'hi kar' hamare store mein available nahi hai"
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 1)
+        self.assertEqual(res["cart"]["items"][0]["product_id"], self.maggi.id)
+
+    def test_bug1_ek_kar_do(self):
+        """TEST 2: 'ek kar do' sets quantity to 1."""
+        session = self.client.session
+        session['last_referenced_product_id'] = self.maggi.id
+        session.save()
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "ek kar do")
+
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 1)
+
+    def test_bug1_2_kar_do(self):
+        """TEST 3: '2 kar do' sets quantity to 2."""
+        session = self.client.session
+        session['last_referenced_product_id'] = self.maggi.id
+        session.save()
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "2 kar do")
+
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 2)
+
+    def test_bug1_order_kar_do(self):
+        """TEST 4: 'order kar do' triggers final order confirmation, NOT quantity 2."""
+        session = self.client.session
+        services.add_to_cart(session, self.shop.id, self.maggi.id, 1)
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "order kar do")
+
+        self.assertIn("order_id", res)
+        order = Order.objects.get(id=res["order_id"])
+        self.assertEqual(order.items.first().quantity, 1) # Must be 1, NOT 2
+
+    def test_bug2_jitne_maggi_stock_me_hai_sare_order_kar_do(self):
+        """TEST 5: Cart empty, DB stock = 5 -> Adds 5 to cart, asks confirmation, does NOT say cart empty."""
+        session = self.client.session
+
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "jitne maggi stock me hai sare order kar do")
+
+        self.assertNotIn("cart empty", res["reply"].lower())
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 5)
+        self.assertEqual(res["cart"]["total"], Decimal('75.00'))
+        self.assertIn("5 packets", res["reply"].lower())
+        self.assertIn("place kar du", res["reply"].lower())
+
+        # Verify no DB Order was created yet
+        self.assertEqual(Order.objects.filter(shop=self.shop).count(), 0)
+
+        # Now customer confirms: "haan" -> Order created!
+        res_confirm = gemini_service._rule_based_nlp_handler(session, self.shop.id, "haan")
+        self.assertIn("order_id", res_confirm)
+        self.assertEqual(Order.objects.filter(shop=self.shop).count(), 1)
+        self.maggi.refresh_from_db()
+        self.assertEqual(self.maggi.stock, 0) # Stock reduced from 5 to 0
+
+    def test_bug2_out_of_stock_all_order(self):
+        """TEST 6: Cart empty, DB stock = 0 -> Returns out of stock message, no cart item created."""
+        self.maggi.stock = 0
+        self.maggi.save()
+
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "jitni maggi stock mein hai saari order kar do")
+
+        self.assertIn("out of stock", res["reply"].lower())
+        self.assertEqual(len(res["cart"]["items"]), 0)
+
+    def test_bug2_saari_available_maggi_order_kar_do(self):
+        """TEST 7: 'saari available Maggi order kar do' adds exact available stock to cart and shows bill."""
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "saari available Maggi order kar do")
+
+        self.assertEqual(res["cart"]["items"][0]["quantity"], 5)
+        self.assertEqual(res["cart"]["total"], Decimal('75.00'))
+        self.assertIn("place kar du", res["reply"].lower())
+
+
+

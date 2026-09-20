@@ -148,20 +148,24 @@ SINGLEWORD_FILLERS = set([
     "क्या", "हमारे", "आपके", "पास", "है", "स्टॉक", "में", "उपलब्ध", "मिलेगा", "मिलेगी", "चाहिए",
     "दे", "दो", "दिखाओ", "कितना", "कितने", "का", "की", "के", "रेट", "भाव", "रखते", "हो", "लोग",
     "किलो", "लीटर", "पैकेट", "ग्राम", "रुपये", "रुपए", "बताओ", "बताइए", "नहीं", "या", "मिलता", "मिलती",
+    "ही", "कर", "बस", "सिर्फ", "एक", "दो", "तीन", "चार", "पाँच", "पांच", "सारे", "सब", "जितने", "जितनी", "जितना",
 
     # English / Hinglish
     "do", "we", "you", "have", "is", "there", "available", "stock", "can", "i", "get",
     "need", "give", "me", "show", "how", "much", "what", "the", "price", "cost", "rate",
     "of", "hai", "kya", "dedo", "add", "also", "bhi", "mein", "me", "pakka", "batao", "bataiye",
     "milega", "milegi", "kitne", "kitna", "kg", "kilo", "litre", "liter", "l", "packet", "packets",
-    "rs", "rupees", "rupee", "aur", "and", "please", "nahi", "ya", "or", "not", "store"
+    "rs", "rupees", "rupee", "aur", "and", "please", "nahi", "ya", "or", "not", "store",
+    "hi", "kar", "bas", "bus", "sirf", "ek", "one", "quantity", "kardo", "karde", "sare", "saare", "sab", "jitne", "jitni", "jitna"
 ])
 
 # WORDS THAT NEVER SHOULD BE SEARCHED AS PRODUCT NAMES
 CONVERSATIONAL_KEYWORDS = set([
     "quantity", "make it", "make that", "change", "change quantity", "add", "add more", "one more", "two more",
     "remove", "delete", "hata do", "kar do", "kardo", "isko", "usko", "it", "that", "this", "ise", "use",
-    "isse", "usse", "मात्रा", "दो", "तीन", "चार", "पाँच", "एक और", "हटा दो", "कर दो", "इसे", "उसे", "इसको", "उसको"
+    "isse", "usse", "मात्रा", "दो", "तीन", "चार", "पाँच", "एक और", "हटा दो", "कर दो", "इसे", "उसे", "इसको", "उसको",
+    "hi kar", "hi kar do", "kar do", "kar de", "1 kar do", "ek kar do", "1 hi kar do", "ek hi kar do",
+    "hi", "kar", "कर", "ही", "बस", "sirf", "1", "2", "3", "4", "5", "ek", "do", "hi kar", "kar", "hi"
 ])
 
 def _extract_number(text):
@@ -272,6 +276,71 @@ def _get_referenced_product(session, shop_id, cart, product_hint=""):
     return None
 
 
+def _handle_add_all_available_stock(session, shop_id, text, cart):
+    """
+    Handle 'ALL AVAILABLE STOCK' intent (e.g. 'jitne maggi stock me hai sare order kar do', 'saari maggi de do').
+    Reads current database stock from PostgreSQL, adds available quantity to session cart,
+    shows bill summary, and asks for explicit confirmation before final order creation.
+    """
+    text_clean = text.strip()
+    prod_query = _extract_product_name(text_clean)
+
+    # Clean control keywords from product query
+    control_words = [
+        "jitne", "jitni", "jitna", "sare", "saare", "sari", "saari", "sab", "stock", "me", "mein", "hai",
+        "all", "available", "order", "kar", "do", "bhi", "utni", "pura", "poora", "entire", "in"
+    ]
+    words = prod_query.split()
+    filtered_words = [w for w in words if w.lower() not in control_words]
+    clean_hint = " ".join(filtered_words).strip()
+
+    target_prod = _get_referenced_product(session, shop_id, cart, product_hint=clean_hint if clean_hint else prod_query)
+
+    if not target_prod:
+        return {
+            "reply": "Aap kaunsa item stock se order karna chahenge?",
+            "cart": cart,
+            "step": "Database Retrieval"
+        }
+
+    # PostgreSQL database is source of truth for stock
+    target_prod.refresh_from_db()
+    current_stock = target_prod.stock
+
+    if current_stock <= 0:
+        return {
+            "reply": f"Sorry, '{target_prod.name}' abhi out of stock hai.",
+            "cart": cart,
+            "step": "Inventory Check"
+        }
+
+    # Set cart quantity to current available stock
+    services.update_cart_quantity(session, shop_id, target_prod.id, current_stock)
+    updated_cart = services.get_cart(session, shop_id)
+    session['last_referenced_product_id'] = target_prod.id
+    session['order_confirmation_pending'] = True
+    session['last_ai_step'] = "Customer Confirmation"
+    session.modified = True
+
+    unit_name = target_prod.unit if target_prod.unit else "packet"
+    if not unit_name.endswith('s') and current_stock > 1:
+        unit_name = unit_name + "s"
+
+    subtotal = target_prod.price * Decimal(current_stock)
+    reply = (
+        f"{target_prod.name} ke {current_stock} {unit_name} stock mein hain. "
+        f"{current_stock} × ₹{target_prod.price} = ₹{subtotal}. "
+        f"Maine {current_stock} {unit_name} cart mein add kar diye hain. Total: ₹{updated_cart['total']}. "
+        f"Kya main order place kar du?"
+    )
+
+    return {
+        "reply": reply,
+        "cart": updated_cart,
+        "step": "Customer Confirmation"
+    }
+
+
 def _rule_based_nlp_handler(session, shop_id, text):
     """
     High-reliability, fully conversational Multilingual (Hindi/Hinglish/English) NLP engine.
@@ -284,6 +353,18 @@ def _rule_based_nlp_handler(session, shop_id, text):
     text_lower = text.strip().lower()
     shop = services.get_shop_or_404(shop_id)
     cart = services.get_cart(session, shop_id)
+
+    # 0. Check for "ALL AVAILABLE STOCK" intent FIRST (e.g. "jitne maggi stock me hai sare order kar do", "saari maggi de do")
+    all_stock_indicators = [
+        "jitne", "jitni", "jitna", "saare", "sare", "saari", "sari", "sab", "all available", "entire stock", "pura stock", "poora stock", "all in stock", "order all"
+    ]
+    has_all_stock_kw = any(w in text_lower or w in text for w in all_stock_indicators)
+    has_stock_or_order_kw = any(w in text_lower or w in text for w in ["stock", "available", "स्टॉक", "उपलब्ध", "order", "de do", "dedo", "chahiye", "add"])
+
+    is_all_stock_intent = has_all_stock_kw and has_stock_or_order_kw and text_lower not in ["order kar do", "order place kar do", "place order"]
+
+    if is_all_stock_intent:
+        return _handle_add_all_available_stock(session, shop_id, text, cart)
 
     # 1. Check for Order Confirmation ("ऑर्डर प्लेस कर दो", "order kar do", "place order", "confirm order")
     confirm_phrases = [
@@ -305,7 +386,7 @@ def _rule_based_nlp_handler(session, shop_id, text):
         "order now", "confirm", "place order"
     ]
 
-    is_confirm = any(phrase in text_lower or phrase in text for phrase in confirm_phrases)
+    is_confirm = not is_all_stock_intent and any(phrase in text_lower or phrase in text for phrase in confirm_phrases)
 
     # Handle pending confirmation state or short confirmations ("yes", "haan", "ha", "हाँ", "जी", "ok")
     short_confirmations = ["haan", "yes", "ha", "हाँ", "जी", "जी हाँ", "ok", "okay", "ठीक है", "ठीक", "yes place it", "yes please", "kar do", "कर दो"]
