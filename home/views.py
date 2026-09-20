@@ -32,25 +32,29 @@ def shopkeeper_register(request):
         phone = request.POST.get('phone', '').strip()
         password = request.POST.get('password', '')
         confirm_password = request.POST.get('confirm_password', '')
+        form_data = {'username': username, 'email': email, 'phone': phone}
 
         if not username or not password or not confirm_password or not phone:
             messages.error(request, "All required fields (Username, Phone, Password, Confirm Password) must be filled.")
-            return render(request, 'shopkeeper/register.html')
+            return render(request, 'shopkeeper/register.html', {'form_data': form_data})
 
         if password != confirm_password:
             messages.error(request, "Passwords do not match.")
-            return render(request, 'shopkeeper/register.html')
+            return render(request, 'shopkeeper/register.html', {'form_data': form_data})
 
         if User.objects.filter(username__iexact=username).exists():
-            messages.error(request, "Username is already taken.")
-            return render(request, 'shopkeeper/register.html')
+            messages.error(request, f"Username '{username}' is already taken. If you already have an account, please login below.")
+            return render(request, 'shopkeeper/register.html', {'form_data': form_data})
 
-        user = User.objects.create_user(username=username, email=email, password=password)
-        ShopkeeperProfile.objects.create(user=user, phone=phone)
-        
-        login(request, user)
-        messages.success(request, "Registration successful! Please create your shop.")
-        return redirect('shopkeeper_create_shop')
+        try:
+            user = User.objects.create_user(username=username, email=email, password=password)
+            ShopkeeperProfile.objects.create(user=user, phone=phone)
+            login(request, user)
+            messages.success(request, "Registration successful! Please create your shop.")
+            return redirect('shopkeeper_create_shop')
+        except Exception as e:
+            messages.error(request, f"Registration failed: {str(e)}")
+            return render(request, 'shopkeeper/register.html', {'form_data': form_data})
 
     return render(request, 'shopkeeper/register.html')
 

@@ -12,81 +12,105 @@ def get_shop_or_404(shop_id):
     return get_object_or_404(Shop, id=shop_id, is_active=True)
 
 # ---------------------------------------------------------------------------
-# Small Hindi/Hinglish → common English product-name transliteration map.
+# Multilingual Hindi/Hinglish → English product-name transliteration map.
 # Keys are lowercase Devanagari / Hinglish spellings.
 # Values are the English terms that typically appear in DB product names.
-# Extend here as needed — no external API required.
 # ---------------------------------------------------------------------------
 _TRANSLITERATION_MAP = {
-    # Maggi
+    # Maggi / Noodles
     "मैगी": "maggi",
     "maggie": "maggi",
+    "noodles": "maggi",
+    "नूडल्स": "maggi",
     # Atta / flour
     "आटा": "atta",
     "आटे": "atta",
     "aata": "atta",
+    "chakki": "atta",
+    "flour": "atta",
     # Milk / Doodh
     "दूध": "milk",
     "doodh": "milk",
     "dudh": "milk",
-    # Salt
+    # Salt / Namak
     "नमक": "salt",
     "namak": "salt",
     # Biscuits
     "बिस्किट": "biscuit",
     "biskut": "biscuit",
     "biscuit": "biscuit",
-    # Oil
+    "biscuits": "biscuit",
+    "parle": "parle-g",
+    # Oil / Tel
     "तेल": "oil",
     "tel": "oil",
-    # Sugar
+    "sunflower": "sunflower",
+    "fortune": "fortune",
+    # Sugar / Chini
     "चीनी": "sugar",
     "chini": "sugar",
-    # Rice
+    # Rice / Chawal
     "चावल": "rice",
     "chawal": "rice",
-    # Dal / lentils
+    "chawl": "rice",
+    # Dal / Lentils
     "दाल": "dal",
-    # Tea
+    # Tea / Chai
     "चाय": "tea",
     "chai": "tea",
+    # Coke / Cold Drink
+    "कोक": "coca cola",
+    "coke": "coca cola",
+    "cola": "coca cola",
+    # Detergent / Surf
+    "सर्फ": "surf excel",
+    "surf": "surf excel",
+    "detergent": "surf excel",
 }
 
 
 def _expand_query_variants(query: str) -> list[str]:
     """
-    Return a list of search terms to try for a given query string.
-    Includes the original, lowercased, and any transliteration expansions.
+    Return an ordered list of search terms to try for a given query string.
+    Normalizes whitespace, trims punctuation, preserves case-insensitivity and script.
     """
-    q = query.strip()
+    import re
+    # Strip common punctuation while preserving word characters in Unicode
+    cleaned = re.sub(r'[?.,!\-:;"\'\(\)]', ' ', query).strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
     variants = []
-
-    # 1. Original query (preserves Devanagari for icontains)
-    if q:
-        variants.append(q)
-
-    # 2. Lowercase version (helps for English mixed-case)
-    ql = q.lower()
-    if ql not in variants:
+    if cleaned:
+        variants.append(cleaned)
+    
+    ql = cleaned.lower()
+    if ql and ql not in variants:
         variants.append(ql)
 
-    # 3. Transliteration lookup (Devanagari / Hinglish → English)
+    # Transliteration lookup for whole query
     mapped = _TRANSLITERATION_MAP.get(ql)
     if mapped and mapped not in variants:
         variants.append(mapped)
+
+    # Token-level transliteration lookup
+    tokens = ql.split()
+    for token in tokens:
+        if token in _TRANSLITERATION_MAP:
+            m_token = _TRANSLITERATION_MAP[token]
+            if m_token not in variants:
+                variants.append(m_token)
 
     return variants
 
 
 def search_product(shop_id, query):
     """
-    Search active products in a specific shop.
+    Search active products in a specific shop with prioritized matching:
+    1. Exact match (case-insensitive name__iexact)
+    2. Starts with (case-insensitive name__istartswith)
+    3. Contains (case-insensitive name__icontains)
 
-    Tries multiple query variants (original + transliterations) so that
-    Hindi terms like 'मैगी' correctly match 'Maggi 2-Minute Noodles',
-    and Hinglish terms like 'aata' match 'Aashirvaad Atta'.
-
-    Shop isolation and is_active filter are always preserved.
+    Shop isolation and is_active filter are strictly preserved.
     """
     import logging
     log = logging.getLogger(__name__)
@@ -94,20 +118,50 @@ def search_product(shop_id, query):
     variants = _expand_query_variants(query)
     log.debug("[search_product] shop=%s raw_query=%r variants=%r", shop_id, query, variants)
 
+    if not variants:
+        return []
+
     seen_ids: set[int] = set()
-    results = []
+    exact_matches = []
+    startswith_matches = []
+    contains_matches = []
 
     for variant in variants:
-        qs = Product.objects.filter(
+        # 1. Exact case-insensitive matches
+        exact_qs = Product.objects.filter(
+            shop_id=shop_id,
+            is_active=True,
+            name__iexact=variant
+        )
+        for p in exact_qs:
+            if p.id not in seen_ids:
+                seen_ids.add(p.id)
+                exact_matches.append(p)
+
+        # 2. Starts-with case-insensitive matches
+        starts_qs = Product.objects.filter(
+            shop_id=shop_id,
+            is_active=True,
+            name__istartswith=variant
+        ).order_by('name')
+        for p in starts_qs:
+            if p.id not in seen_ids:
+                seen_ids.add(p.id)
+                startswith_matches.append(p)
+
+        # 3. Contains case-insensitive matches
+        contains_qs = Product.objects.filter(
             shop_id=shop_id,
             is_active=True,
             name__icontains=variant
         ).order_by('name')
-        for p in qs:
+        for p in contains_qs:
             if p.id not in seen_ids:
                 seen_ids.add(p.id)
-                results.append(p)
+                contains_matches.append(p)
 
+    # Return ranked results: exact matches first, then prefix matches, then substring matches
+    results = exact_matches + startswith_matches + contains_matches
     log.debug("[search_product] found %d product(s): %s",
               len(results), [p.name for p in results])
     return results

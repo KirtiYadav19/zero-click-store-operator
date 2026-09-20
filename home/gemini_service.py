@@ -4,6 +4,7 @@ import re
 from decimal import Decimal
 from decouple import config
 from . import services
+from .models import Product
 
 logger = logging.getLogger(__name__)
 
@@ -13,23 +14,31 @@ SYSTEM_INSTRUCTION = """
 You are an intelligent, polite AI store operator and cashier for a neighborhood kirana store.
 Your goal is to assist customers with natural language ordering in English, Hindi, or Hinglish.
 
-CRITICAL FUNCTION CALLING RULES:
-1. When calling search_product(query), query MUST contain ONLY the product name or short product search phrase (e.g. "मैगी", "Maggi", "aata", "milk").
-   DO NOT pass full sentences like "क्या हमारे पास मैगी है स्टॉक में?" or "Do you have Maggi?".
-   Extract only the product name!
+CRITICAL FUNCTION CALLING AND CONTEXT RULES:
+1. When calling search_product(query), query MUST contain ONLY the product name or short product search phrase (e.g. "rice", "मैगी", "Maggi", "aata", "milk").
+   DO NOT pass full sentences or conversational phrases (like "add quantity 2", "make it 2", "isko 2 kar do", "Do you have rice?").
 
-2. DISTINGUISH INTENTS CAREFULLY:
-   - CHECK AVAILABILITY / STOCK ("क्या हमारे पास मैगी है?", "Is Maggi in stock?"):
-     Call search_product(query="Maggi") first. Then answer with stock count. DO NOT call add_to_cart unless asked!
-   - CHECK PRICE ("मैगी कितने की है?", "Price of Maggi?"):
-     Call search_product(query="Maggi"). Answer with product price. DO NOT call add_to_cart!
-   - ADD TO CART ("एक मैगी दे दो", "Maggi add kar do"):
-     Call search_product(query="Maggi") or add_to_cart directly.
-   - ORDER CONFIRMATION ("haan", "yes", "place order"):
+2. CONVERSATIONAL FOLLOW-UPS & CART MUTATIONS:
+   - SET QUANTITY ("add quantity 2", "make it 3", "isko 2 kar do", "दो कर दो"):
+     Use the referenced product from CURRENT CART / LAST REFERENCED PRODUCT.
+     Call update_cart_quantity(product_id, quantity) to SET the total quantity.
+   - INCREASE QUANTITY ("add 2 more", "2 aur add kar do", "ek aur"):
+     Call add_to_cart(product_id, quantity) to add more to existing quantity.
+   - REMOVE ITEM ("isko hata do", "remove maggi"):
+     Call remove_from_cart(product_id).
+
+3. DISTINGUISH INTENTS CAREFULLY:
+   - CHECK AVAILABILITY / STOCK ("क्या हमारे पास rice है?", "Rice stock mein hai?", "Is Maggi in stock?"):
+     Call search_product(query="rice") or check_stock. Answer with stock count. DO NOT call add_to_cart unless asked!
+   - CHECK PRICE ("Rice kitne ka hai?", "चावल कितने का है?", "Price of Maggi?"):
+     Call search_product(query="rice"). Answer with product price. DO NOT call add_to_cart!
+   - ADD TO CART ("2 kg rice de do", "एक किलो चावल दे दो", "Maggi add kar do"):
+     Call search_product followed by add_to_cart.
+   - ORDER CONFIRMATION ("haan", "yes", "confirm", "order kar do"):
      Call place_order.
 
-3. Never invent prices or stock numbers. Always use backend tool output.
-4. Match customer language style naturally.
+4. Never invent prices or stock numbers. Always use backend tool output.
+5. Match customer language style naturally.
 """
 
 def _execute_tool(session, shop_id, tool_name, tool_args):
@@ -64,12 +73,16 @@ def _execute_tool(session, shop_id, tool_name, tool_args):
         pid = tool_args.get("product_id")
         qty = tool_args.get("quantity", 1)
         success, msg = services.add_to_cart(session, shop_id, pid, qty)
+        if success:
+            session['last_referenced_product_id'] = pid
         return {"success": success, "message": msg}, "Cart Building"
 
     elif tool_name == "update_cart_quantity":
         pid = tool_args.get("product_id")
         qty = tool_args.get("quantity", 0)
         success, msg = services.update_cart_quantity(session, shop_id, pid, qty)
+        if success:
+            session['last_referenced_product_id'] = pid
         return {"success": success, "message": msg}, "Cart Building"
 
     elif tool_name == "remove_from_cart":
@@ -109,28 +122,70 @@ def _execute_tool(session, shop_id, tool_name, tool_args):
     return {"error": "Unknown tool"}, "AI Parsing"
 
 
-# INTENT PHRASES (multi-word) to remove first
+# NUMBER MAP FOR MULTILINGUAL QUANTITIES
+NUMBER_WORDS = {
+    "एक": 1, "दो": 2, "तीन": 3, "चार": 4, "पाँच": 5, "पांच": 5, "छह": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10,
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "ek": 1, "do": 2, "teen": 3, "char": 4, "paanch": 5, "panch": 5, "chhe": 6, "saat": 7, "aath": 8, "nau": 9, "das": 10
+}
+
+# MULTI-WORD INTENT PHRASES (to remove from product query extraction)
 MULTIWORD_INTENT_PHRASES = [
     "do we have", "do you have", "is there", "can i get", "i need", "give me", "show me",
-    "what is the price of", "price of", "cost of", "rate of", "how much is", "how much",
+    "what is the price of", "what is the price", "price of", "cost of", "rate of", "how much is", "how much",
     "in stock", "stock mein hai", "stock mein", "stock me", "available hai", "kya hamare paas",
     "kya hamare pass", "kya aapke paas", "kya aapke pass", "add kar do", "add karo",
-    "de do", "chahiye", "hai kya", "batao", "bataiye"
+    "de do", "dedo", "chahiye", "hai kya", "batao", "bataiye", "kitne ki hai", "kitne ka hai",
+    "kitne ki", "kitne ka", "kitna stock hai", "kitna hai"
 ]
 
-# SINGLE WORD FILLERS to remove next
+# SINGLE WORD FILLERS (to remove from product query extraction)
 SINGLEWORD_FILLERS = set([
     # Hindi Devanagari
     "क्या", "हमारे", "पास", "है", "स्टॉक", "में", "उपलब्ध", "मिलेगा", "मिलेगी", "चाहिए",
-    "दे", "दो", "दिखाओ", "कितना", "कितने", "का", "की", "रेट", "भाव", "रखते", "हो", "लोग",
-    "एक", "दो", "तीन", "चार", "पांच", "1", "2", "3", "4", "5", "किलो", "लीटर", "पैकेट", "ग्राम",
+    "दे", "दो", "दिखाओ", "कितना", "कितने", "का", "की", "के", "रेट", "भाव", "रखते", "हो", "लोग",
+    "किलो", "लीटर", "पैकेट", "ग्राम", "रुपये", "रुपए", "बताओ", "बताइए",
 
     # English / Hinglish
     "do", "we", "you", "have", "is", "there", "available", "stock", "can", "i", "get",
     "need", "give", "me", "show", "how", "much", "what", "the", "price", "cost", "rate",
-    "of", "hai", "kya", "dedo", "add", "also", "bhi", "mein", "pakka", "batao", "bataiye",
-    "milega", "milegi", "kitne", "kitna", "kg", "kilo", "litre", "liter", "l", "packet", "packets"
+    "of", "hai", "kya", "dedo", "add", "also", "bhi", "mein", "me", "pakka", "batao", "bataiye",
+    "milega", "milegi", "kitne", "kitna", "kg", "kilo", "litre", "liter", "l", "packet", "packets",
+    "rs", "rupees", "rupee", "aur", "and", "please"
 ])
+
+# WORDS THAT NEVER SHOULD BE SEARCHED AS PRODUCT NAMES
+CONVERSATIONAL_KEYWORDS = set([
+    "quantity", "make it", "make that", "change", "change quantity", "add", "add more", "one more", "two more",
+    "remove", "delete", "hata do", "kar do", "kardo", "isko", "usko", "it", "that", "this", "ise", "use",
+    "isse", "usse", "मात्रा", "दो", "तीन", "चार", "पाँच", "एक और", "हटा दो", "कर दो", "इसे", "उसे", "इसको", "उसको"
+])
+
+def _extract_number(text):
+    """Extract numeric or worded quantity from text."""
+    text_lower = text.strip().lower()
+    
+    # 1. Match numeric digits
+    m = re.search(r'\b(\d+)\b', text_lower)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+
+    # 2. Match Unicode / word tokens
+    tokens = re.findall(r'[\u0900-\u097F\w]+', text_lower)
+    for token in tokens:
+        if token in NUMBER_WORDS:
+            return NUMBER_WORDS[token]
+
+    # 3. Match substring words
+    for word, num in NUMBER_WORDS.items():
+        if word in text_lower:
+            return num
+
+    return None
+
 
 def _extract_product_name(text):
     """
@@ -146,41 +201,76 @@ def _extract_product_name(text):
         c_low = pattern.sub(" ", c_low)
 
     # 2. Remove punctuation
-    c_low = re.sub(r'[?.,!\-:;]', ' ', c_low)
+    c_low = re.sub(r'[?.,!\-:;"\'\(\)]', ' ', c_low)
 
     # 3. Token-by-token filtering for remaining fillers
     tokens = c_low.split()
-    remaining = [t for t in tokens if t not in SINGLEWORD_FILLERS and not t.isdigit()]
+    remaining = [t for t in tokens if t not in SINGLEWORD_FILLERS and not t.isdigit() and t not in NUMBER_WORDS]
 
     if remaining:
-        extracted = " ".join(remaining)
+        extracted = " ".join(remaining).strip()
         logger.info(f"[Product Extractor] Raw: '{text}' -> Extracted: '{extracted}'")
         return extracted
 
     # Fallback to Devanagari word extraction if everything got stripped or mixed
     words = re.findall(r'[\u0900-\u097F\w]+', text)
-    filtered = [w for w in words if w.lower() not in SINGLEWORD_FILLERS and w not in SINGLEWORD_FILLERS and not w.isdigit()]
+    filtered = [w for w in words if w.lower() not in SINGLEWORD_FILLERS and w not in SINGLEWORD_FILLERS and not w.isdigit() and w.lower() not in NUMBER_WORDS]
     if filtered:
-        return " ".join(filtered)
+        return " ".join(filtered).strip()
 
     return text.strip()
 
 
+def _get_referenced_product(session, shop_id, cart, product_hint=""):
+    """
+    Resolve which product the user is referring to (e.g. 'isko', 'it', 'add quantity 2').
+    Returns Product instance or None.
+    """
+    # 1. If explicit hint provided, try searching
+    if product_hint and product_hint not in CONVERSATIONAL_KEYWORDS:
+        matches = services.search_product(shop_id, product_hint)
+        if matches:
+            return matches[0]
+
+    # 2. Check session last_referenced_product_id
+    last_pid = session.get('last_referenced_product_id')
+    if last_pid:
+        try:
+            return Product.objects.get(id=last_pid, shop_id=shop_id, is_active=True)
+        except Product.DoesNotExist:
+            pass
+
+    # 3. If cart has exactly one item, that's unambiguous
+    if cart and len(cart['items']) == 1:
+        pid = cart['items'][0]['product_id']
+        try:
+            return Product.objects.get(id=pid, shop_id=shop_id, is_active=True)
+        except Product.DoesNotExist:
+            pass
+
+    return None
+
+
 def _rule_based_nlp_handler(session, shop_id, text):
     """
-    High-reliability Hinglish/Hindi/English NLP fallback engine for hackathon demo.
-    Executes actual backend tools against PostgreSQL via services.py.
+    High-reliability, fully conversational Multilingual (Hindi/Hinglish/English) NLP engine.
+    Handles follow-up references ('add quantity 2', 'make it 3', 'isko hata do', '2 aur add kar do'),
+    case-insensitive searches, stock/price queries, multi-product ordering, and atomic checkout.
     """
-    logger.info(f"=== FALLBACK NLP HANDLER ===")
+    logger.info(f"=== RULE-BASED NLP HANDLER ===")
     logger.info(f"USER INPUT: '{text}' | SHOP ID: {shop_id}")
 
     text_lower = text.strip().lower()
     shop = services.get_shop_or_404(shop_id)
     cart = services.get_cart(session, shop_id)
 
-    # 1. Check for Order Confirmation ("haan", "yes", "confirm", "order kar do", "place it")
-    confirm_phrases = ["haan", "yes", "ha", "confirm", "place order", "order kar do", "order place", "kar do", "kardo"]
+    # 1. Check for Order Confirmation ("haan", "yes", "confirm", "order kar do", "place order")
+    confirm_phrases = ["order kar do", "order place kar do", "place order", "order place", "order confirm", "confirm order", "confirm kar do", "haan order", "yes order", "confirm"]
     is_confirm = any(phrase in text_lower for phrase in confirm_phrases) and cart["items"]
+    
+    # Standalone "haan" or "yes" or "ha"
+    if text_lower in ["haan", "yes", "ha", "confirm", "place order"] and cart["items"]:
+        is_confirm = True
 
     if is_confirm:
         order, err = services.place_order_atomic(session, shop_id, "Customer", "9876543210", "")
@@ -200,8 +290,8 @@ def _rule_based_nlp_handler(session, shop_id, text):
                 "step": "Inventory Check"
             }
 
-    # 2. Check for Cancellation ("cancel", "rehne do", "nahi chahiye")
-    cancel_phrases = ["cancel", "rehne do", "nahi chahiye", "clear cart"]
+    # 2. Check for Cancellation ("cancel", "rehne do", "nahi chahiye", "clear cart")
+    cancel_phrases = ["clear cart", "cancel order", "sab hata do"]
     if any(phrase in text_lower for phrase in cancel_phrases):
         services.clear_cart(session, shop_id)
         updated_cart = services.get_cart(session, shop_id)
@@ -211,9 +301,9 @@ def _rule_based_nlp_handler(session, shop_id, text):
             "step": "Cart Building"
         }
 
-    # 3. Check for Completion ("bas", "itna hi", "that's all", "nothing else", "done")
+    # 3. Check for Completion / Bill Summary ("bas", "itna hi", "that's all", "done")
     done_phrases = ["bas", "itna hi", "that's all", "nothing else", "aur kuch nahi", "done", "bas itna hi"]
-    if any(phrase in text_lower for phrase in done_phrases):
+    if any(phrase in text_lower for phrase in done_phrases) and not any(w in text_lower for w in ["add", "aur", "de do", "chahiye"]):
         if not cart["items"]:
             return {
                 "reply": "Aapka cart abhi khali hai. Kya add karna chahenge?",
@@ -221,7 +311,7 @@ def _rule_based_nlp_handler(session, shop_id, text):
                 "step": "AI Parsing"
             }
 
-        item_summary = ", ".join([f"{item['quantity']} {item['name']} (₹{item['subtotal']})" for item in cart['items']])
+        item_summary = ", ".join([f"{item['quantity']} × {item['name']} (₹{item['subtotal']})" for item in cart['items']])
         reply = f"Aapka order summary: {item_summary}. Total Bill: ₹{cart['total']}. Kya order place kar du? (Say 'Haan' or 'Yes' to confirm)"
         return {
             "reply": reply,
@@ -229,30 +319,152 @@ def _rule_based_nlp_handler(session, shop_id, text):
             "step": "Customer Confirmation"
         }
 
-    # Determine Intent: Price Check vs Stock Check vs Add to Cart
-    is_add_action = any(w in text_lower or w in text for w in ["add", "dedo", "de do", "chahiye", "चाहिए", "दे दो", "buy", "order", "lao", "ले लो"])
+    # 4. Check for Remove / Delete Item ("isko hata do", "remove it", "delete it", "hata do")
+    remove_phrases = ["hata do", "remove", "delete", "hata de", "nikal do", "cancel"]
+    if any(phrase in text_lower for phrase in remove_phrases) and not is_confirm:
+        prod_hint = _extract_product_name(text)
+        target_prod = _get_referenced_product(session, shop_id, cart, product_hint=prod_hint if prod_hint not in CONVERSATIONAL_KEYWORDS else "")
+
+        if target_prod:
+            services.remove_from_cart(session, shop_id, target_prod.id)
+            updated_cart = services.get_cart(session, shop_id)
+            return {
+                "reply": f"{target_prod.name} cart se remove kar diya gaya hai. Total: ₹{updated_cart['total']}. Aur kuch chahiye?",
+                "cart": updated_cart,
+                "step": "Cart Building"
+            }
+        elif cart['items']:
+            options = " ya ".join([item['name'] for item in cart['items']])
+            return {
+                "reply": f"Aap kaunsa item remove karna chahenge ({options})?",
+                "cart": cart,
+                "step": "Cart Building"
+            }
+
+    # 5. Check for Conversational Quantity Modification (SET QUANTITY vs ADD MORE)
+    is_add_more = any(p in text_lower for p in ["aur add", "more", "ek aur", "one more", "another", "और जोड़"]) or ("aur" in text_lower and "add" in text_lower and "quantity" not in text_lower)
+    
+    is_set_quantity = (
+        ("quantity" in text_lower or "make it" in text_lower or "make that" in text_lower or "change" in text_lower or
+         "kar do" in text_lower or "kardo" in text_lower or "isko" in text_lower or "isse" in text_lower or "मात्रा" in text_lower or "कर दो" in text_lower or "करदी" in text_lower)
+        and _extract_number(text) is not None
+        and not is_add_more
+    )
+
+    if is_add_more:
+        qty_inc = _extract_number(text) or 1
+        prod_hint = _extract_product_name(text)
+        target_prod = _get_referenced_product(session, shop_id, cart, product_hint=prod_hint if prod_hint not in CONVERSATIONAL_KEYWORDS else "")
+
+        if target_prod:
+            success, msg = services.add_to_cart(session, shop_id, target_prod.id, qty_inc)
+            updated_cart = services.get_cart(session, shop_id)
+            session['last_referenced_product_id'] = target_prod.id
+            if success:
+                curr_item = next((it for it in updated_cart['items'] if it['product_id'] == target_prod.id), None)
+                curr_qty = curr_item['quantity'] if curr_item else qty_inc
+                reply = f"{target_prod.name} ki quantity ab {curr_qty} kar di gayi hai. Total: ₹{updated_cart['total']}. Aur kuch chahiye?"
+            else:
+                reply = msg
+            return {
+                "reply": reply,
+                "cart": updated_cart,
+                "step": "Cart Building"
+            }
+
+    if is_set_quantity:
+        target_qty = _extract_number(text)
+        if target_qty is not None:
+            prod_hint = _extract_product_name(text)
+            target_prod = _get_referenced_product(session, shop_id, cart, product_hint=prod_hint if prod_hint not in CONVERSATIONAL_KEYWORDS else "")
+
+            if target_prod:
+                success, msg = services.update_cart_quantity(session, shop_id, target_prod.id, target_qty)
+                updated_cart = services.get_cart(session, shop_id)
+                session['last_referenced_product_id'] = target_prod.id
+                if success:
+                    reply = f"{target_prod.name} ki quantity {target_qty} kar di gayi hai. Total: ₹{updated_cart['total']}. Aur kuch chahiye?"
+                else:
+                    reply = msg
+                return {
+                    "reply": reply,
+                    "cart": updated_cart,
+                    "step": "Cart Building"
+                }
+            elif cart['items'] and len(cart['items']) > 1:
+                options = " ya ".join([item['name'] for item in cart['items']])
+                return {
+                    "reply": f"Aap {options} mein se kiski quantity {target_qty} karna chahte hain?",
+                    "cart": cart,
+                    "step": "Cart Building"
+                }
+
+    # 6. Check for Stock or Price Query Intent (Informational ONLY, NO Cart Mutation)
+    is_add_action = any(w in text_lower or w in text for w in ["add", "dedo", "de do", "chahiye", "चाहिए", "दे दो", "buy", "order", "lao", "ले लो"]) and not any(w in text_lower for w in ["stock", "price", "rate", "kitne", "available", "उपलब्ध", "भाव"])
 
     is_price_check = not is_add_action and any(word in text_lower or word in text for word in [
-        "kitne ki", "kitna", "price", "rate", "cost", "कितने की", "कितना", "रेट", "भाव", "how much", "what is the price"
+        "kitne ki", "kitne ka", "kitna", "price", "rate", "cost", "कितने की", "कितने का", "कितना", "रेट", "भाव", "how much", "what is the price"
     ])
 
     is_stock_check = not is_add_action and not is_price_check and any(word in text_lower or word in text for word in [
-        "stock", "available", "उपलब्ध", "स्टॉक", "मिलेगा", "मिलेगी", "रखते हो", "do you have", "do we have", "is there", "है क्या", "है?"
+        "stock", "available", "उपलब्ध", "स्टॉक", "मिलेगा", "मिलेगी", "रखते हो", "do you have", "do we have", "is there", "hai kya", "है क्या", "है?", "have"
     ])
 
-    # Extract Quantity
-    qty = 1
-    qty_match = re.search(r'(\d+)\s*(kg|kilo|litre|liter|l|packet|packets|pkt|piece|pieces)?', text_lower)
-    if qty_match:
-        try:
-            qty = int(qty_match.group(1))
-        except ValueError:
-            qty = 1
+    # Follow-up stock/price check on previous item (e.g. "kitna stock hai?", "kitne ki hai?")
+    if (is_stock_check or is_price_check) and not _extract_product_name(text):
+        target_prod = _get_referenced_product(session, shop_id, cart)
+        if target_prod:
+            if is_price_check:
+                return {
+                    "reply": f"{target_prod.name} ₹{target_prod.price} per {target_prod.unit} hai.",
+                    "cart": cart,
+                    "step": "Database Retrieval"
+                }
+            elif is_stock_check:
+                if target_prod.stock > 0:
+                    reply = f"Haan! {target_prod.name} available hai. Abhi {target_prod.stock} {target_prod.unit}s stock mein hain."
+                else:
+                    reply = f"Sorry, {target_prod.name} abhi out of stock hai."
+                return {
+                    "reply": reply,
+                    "cart": cart,
+                    "step": "Inventory Check"
+                }
 
-    # Extract clean product query
+    # 7. Check for Multi-Product Addition (e.g. "2 kg rice aur 1 litre milk de do")
+    parts = re.split(r'\s+(?:aur|and|,|\+)\s+', text, flags=re.IGNORECASE)
+    if len(parts) > 1 and is_add_action:
+        added_summaries = []
+        for part in parts:
+            p_qty = _extract_number(part) or 1
+            p_query = _extract_product_name(part)
+            if p_query:
+                p_matches = services.search_product(shop_id, p_query)
+                if p_matches:
+                    prod = p_matches[0]
+                    succ, m = services.add_to_cart(session, shop_id, prod.id, p_qty)
+                    if succ:
+                        added_summaries.append(f"{p_qty} × {prod.name}")
+                        session['last_referenced_product_id'] = prod.id
+
+        if added_summaries:
+            updated_cart = services.get_cart(session, shop_id)
+            reply = f"Added {', '.join(added_summaries)} to cart. Total: ₹{updated_cart['total']}. Aur kuch chahiye?"
+            return {
+                "reply": reply,
+                "cart": updated_cart,
+                "step": "Bill Calculation"
+            }
+
+    # 8. Single Product Extraction & DB Lookup
     product_query = _extract_product_name(text)
 
-    # Perform DB search using improved search_product
+    # If query is empty or in conversational keywords, try referencing last item
+    if not product_query or product_query in CONVERSATIONAL_KEYWORDS:
+        target_prod = _get_referenced_product(session, shop_id, cart)
+        if target_prod:
+            product_query = target_prod.name
+
     matches = services.search_product(shop_id, product_query)
 
     logger.info(f"FALLBACK NLP SEARCH: query='{product_query}' | Matches found: {[p.name for p in matches]}")
@@ -264,7 +476,8 @@ def _rule_based_nlp_handler(session, shop_id, text):
             "step": "Database Retrieval"
         }
 
-    if len(matches) > 1:
+    # If multiple matches found (e.g. "Maggi 70g" vs "Maggi 140g"), ask for clarification
+    if len(matches) > 1 and matches[0].name.lower() != product_query.lower():
         options = ", ".join([f"{p.name} (₹{p.price}/{p.unit})" for p in matches])
         return {
             "reply": f"'{product_query}' ke multiple options available hain: {options}. Aap kaunsa chahenge?",
@@ -273,6 +486,7 @@ def _rule_based_nlp_handler(session, shop_id, text):
         }
 
     product = matches[0]
+    session['last_referenced_product_id'] = product.id
 
     # Handle Price Check Query (Informational ONLY, NO CART ADDITION)
     if is_price_check:
@@ -297,6 +511,7 @@ def _rule_based_nlp_handler(session, shop_id, text):
         }
 
     # Handle Add To Cart Intent
+    qty = _extract_number(text) or 1
     avail, stock, _ = services.check_stock(shop_id, product.id, qty)
 
     if not avail:
@@ -327,7 +542,8 @@ def _rule_based_nlp_handler(session, shop_id, text):
 def process_customer_message(session, shop_id, user_message):
     """
     Main entry point for customer AI conversation.
-    Tries official Google GenAI SDK with Function Calling, falling back gracefully to robust NLP engine.
+    Prepares live structured cart context and last referenced product,
+    tries official Google GenAI SDK with Function Calling, falling back gracefully to robust NLP engine.
     """
     if not GEMINI_API_KEY:
         logger.info("GEMINI_API_KEY not set in .env. Using fallback NLP service.")
@@ -339,21 +555,24 @@ def process_customer_message(session, shop_id, user_message):
 
         client = genai.Client(api_key=GEMINI_API_KEY)
         shop = services.get_shop_or_404(shop_id)
+        current_cart = services.get_cart(session, shop_id)
+        last_pid = session.get('last_referenced_product_id')
+        last_pname = ""
+        if last_pid:
+            try:
+                p = Product.objects.get(id=last_pid, shop_id=shop_id)
+                last_pname = p.name
+            except Product.DoesNotExist:
+                pass
 
-        # Tools declaration for Gemini
-        tools = [
-            services.search_product,
-            services.check_stock,
-            services.add_to_cart,
-            services.update_cart_quantity,
-            services.remove_from_cart,
-            services.get_cart,
-            services.place_order_atomic
-        ]
+        cart_context_str = json.dumps(current_cart['items'])
+        context_prompt = (
+            f"[Store: {shop.name}, Shop ID: {shop_id}]\n"
+            f"[CURRENT CART: {cart_context_str} | Total: ₹{current_cart['total']}]\n"
+            f"[LAST REFERENCED PRODUCT: {last_pname} (ID: {last_pid})]\n"
+            f"Customer: {user_message}"
+        )
 
-        context_prompt = f"[Store: {shop.name}, Shop ID: {shop_id}] Customer: {user_message}"
-
-        # Try gemini models with function calling
         for model_name in ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']:
             try:
                 config_obj = types.GenerateContentConfig(

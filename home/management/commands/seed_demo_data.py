@@ -1,6 +1,9 @@
+from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
-from home.models import ShopkeeperProfile, Shop, Product, Order
+from django.db import transaction
+
+from home.models import ShopkeeperProfile, Shop, Product, Customer, Order
 
 class Command(BaseCommand):
     help = 'Seeds or resets development demo data for Zero-Click Store Operator hackathon demo.'
@@ -9,80 +12,121 @@ class Command(BaseCommand):
         parser.add_argument(
             '--reset',
             action='store_true',
-            help='Reset inventory stock levels and clear previous demo orders.',
+            help='Reset inventory stock levels and clear previous demo orders for Rahul General Store.',
         )
 
     def handle(self, *args, **options):
         reset_mode = options.get('reset', False)
-        self.stdout.write(f"Seeding demo data (Reset mode: {reset_mode})...")
 
-        # 1. Demo Shopkeeper: Rahul
-        u1, created1 = User.objects.get_or_create(
-            username='rahul_shopkeeper',
-            defaults={'email': 'rahul@store.com', 'is_staff': True}
-        )
-        if created1:
-            u1.set_password('pass123')
-            u1.save()
+        with transaction.atomic():
+            # 1. Demo Shopkeeper User
+            user, u_created = User.objects.get_or_create(
+                username='demo_shopkeeper',
+                defaults={
+                    'email': 'demo@zeroclick.local',
+                    'is_staff': True
+                }
+            )
+            user.email = 'demo@zeroclick.local'
+            user.set_password('Demo@12345')
+            user.save()
 
-        prof1, _ = ShopkeeperProfile.objects.get_or_create(user=u1, defaults={'phone': '9876543210'})
-        shop1, _ = Shop.objects.get_or_create(
-            shopkeeper=prof1,
-            name='Rahul General Store',
-            defaults={'address': 'Shop #12, Main Market, Sector 4', 'phone': '9876543210', 'is_active': True}
-        )
+            # 2. Demo Shopkeeper Profile
+            profile, _ = ShopkeeperProfile.objects.get_or_create(
+                user=user,
+                defaults={'phone': '9999999999'}
+            )
+            if profile.phone != '9999999999':
+                profile.phone = '9999999999'
+                profile.save()
 
-        p1_list = [
-            {'name': 'Aashirvaad Atta', 'price': 120.00, 'unit': 'kg', 'stock': 10, 'is_active': True},
-            {'name': 'Amul Milk', 'price': 65.00, 'unit': 'litre', 'stock': 5, 'is_active': True},
-            {'name': 'Parle-G Biscuits', 'price': 20.00, 'unit': 'packet', 'stock': 20, 'is_active': True},
-            {'name': 'Fortune Oil', 'price': 150.00, 'unit': 'litre', 'stock': 5, 'is_active': True},
-            {'name': 'Tata Salt', 'price': 25.00, 'unit': 'packet', 'stock': 15, 'is_active': True},
-        ]
+            # 3. Demo Shop
+            shop, _ = Shop.objects.get_or_create(
+                shopkeeper=profile,
+                name='Rahul General Store',
+                defaults={
+                    'address': 'Main Market',
+                    'phone': '9999999999',
+                    'is_active': True
+                }
+            )
+            shop.address = 'Main Market'
+            shop.phone = '9999999999'
+            shop.is_active = True
+            shop.save()
 
-        if reset_mode:
-            Order.objects.filter(shop=shop1).delete()
+            # 4. Clear orders if reset mode
+            if reset_mode:
+                Order.objects.filter(shop=shop).delete()
 
-        for item in p1_list:
-            p, created = Product.objects.get_or_create(shop=shop1, name=item['name'], defaults=item)
-            if not created and reset_mode:
-                p.price = item['price']
-                p.stock = item['stock']
-                p.unit = item['unit']
-                p.is_active = item['is_active']
-                p.save()
+            # 5. Demo Products
+            products_data = [
+                {'name': 'Aashirvaad Atta', 'price': Decimal('120.00'), 'unit': 'kg', 'stock': 10, 'is_active': True},
+                {'name': 'Amul Milk', 'price': Decimal('65.00'), 'unit': 'litre', 'stock': 5, 'is_active': True},
+                {'name': 'Parle-G Biscuits', 'price': Decimal('20.00'), 'unit': 'packet', 'stock': 20, 'is_active': True},
+                {'name': 'Fortune Sunflower Oil', 'price': Decimal('150.00'), 'unit': 'litre', 'stock': 5, 'is_active': True},
+                {'name': 'Tata Salt', 'price': Decimal('25.00'), 'unit': 'packet', 'stock': 15, 'is_active': True},
+                {'name': 'Maggi 2-Minute Noodles', 'price': Decimal('15.00'), 'unit': 'packet', 'stock': 10, 'is_active': True},
+                {'name': 'Coca Cola', 'price': Decimal('40.00'), 'unit': 'bottle', 'stock': 10, 'is_active': True},
+                {'name': 'Surf Excel', 'price': Decimal('120.00'), 'unit': 'packet', 'stock': 5, 'is_active': True},
+            ]
 
-        # 2. Demo Shopkeeper 2: Sharma
-        u2, created2 = User.objects.get_or_create(
-            username='sharma_shopkeeper',
-            defaults={'email': 'sharma@kirana.com', 'is_staff': True}
-        )
-        if created2:
-            u2.set_password('pass123')
-            u2.save()
+            processed_products = []
+            for pdata in products_data:
+                product, p_created = Product.objects.get_or_create(
+                    shop=shop,
+                    name=pdata['name'],
+                    defaults=pdata
+                )
+                if not p_created or reset_mode:
+                    product.price = pdata['price']
+                    product.unit = pdata['unit']
+                    product.stock = pdata['stock']
+                    product.is_active = pdata['is_active']
+                    product.save()
 
-        prof2, _ = ShopkeeperProfile.objects.get_or_create(user=u2, defaults={'phone': '9123456789'})
-        shop2, _ = Shop.objects.get_or_create(
-            shopkeeper=prof2,
-            name='Sharma Kirana Store',
-            defaults={'address': 'Station Road, Market Square', 'phone': '9123456789', 'is_active': True}
-        )
+                processed_products.append(product)
 
-        p2_list = [
-            {'name': 'Fortune Chakki Fresh Atta', 'price': 118.00, 'unit': 'kg', 'stock': 15, 'is_active': True},
-            {'name': 'Mother Dairy Milk', 'price': 64.00, 'unit': 'litre', 'stock': 20, 'is_active': True},
-        ]
+            # 6. Demo Customer
+            customer, _ = Customer.objects.get_or_create(
+                phone='9876543210',
+                defaults={
+                    'name': 'Demo Customer',
+                    'address': 'Main Market'
+                }
+            )
 
-        if reset_mode:
-            Order.objects.filter(shop=shop2).delete()
+        # Output Summary (ASCII safe for all terminals & Windows encodings)
+        self.stdout.write(self.style.SUCCESS("=" * 40))
+        self.stdout.write(self.style.SUCCESS("ZERO-CLICK STORE OPERATOR"))
+        self.stdout.write(self.style.SUCCESS("DEMO DATA SETUP"))
+        self.stdout.write(self.style.SUCCESS("=" * 40 + "\n"))
 
-        for item in p2_list:
-            p, created = Product.objects.get_or_create(shop=shop2, name=item['name'], defaults=item)
-            if not created and reset_mode:
-                p.price = item['price']
-                p.stock = item['stock']
-                p.unit = item['unit']
-                p.is_active = item['is_active']
-                p.save()
+        self.stdout.write("Database:")
+        self.stdout.write("PostgreSQL\n")
 
-        self.stdout.write(self.style.SUCCESS("Successfully seeded/reset demo stores and catalog products!"))
+        self.stdout.write("Shopkeeper:")
+        self.stdout.write("demo_shopkeeper [OK]\n")
+
+        self.stdout.write("Shop:")
+        self.stdout.write("Rahul General Store [OK]\n")
+
+        self.stdout.write("Products:")
+        self.stdout.write(f"{len(processed_products)} products created/updated [OK]\n")
+
+        self.stdout.write("Demo stock:")
+        for p in processed_products:
+            self.stdout.write(f" - {p.name}: {p.stock} {p.unit}")
+
+        self.stdout.write("\n" + "=" * 40)
+        self.stdout.write(self.style.SUCCESS("DEMO DATA READY"))
+        self.stdout.write("=" * 40 + "\n")
+
+        self.stdout.write("Login:")
+        self.stdout.write("Username: demo_shopkeeper")
+        self.stdout.write("Password: Demo@12345\n")
+
+        self.stdout.write("Customer:")
+        self.stdout.write("Use customer ordering flow\n")
+
+        self.stdout.write("=" * 40)
