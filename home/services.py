@@ -11,13 +11,106 @@ def get_shop_or_404(shop_id):
     """Retrieve an active shop or raise 404."""
     return get_object_or_404(Shop, id=shop_id, is_active=True)
 
+# ---------------------------------------------------------------------------
+# Small Hindi/Hinglish → common English product-name transliteration map.
+# Keys are lowercase Devanagari / Hinglish spellings.
+# Values are the English terms that typically appear in DB product names.
+# Extend here as needed — no external API required.
+# ---------------------------------------------------------------------------
+_TRANSLITERATION_MAP = {
+    # Maggi
+    "मैगी": "maggi",
+    "maggie": "maggi",
+    # Atta / flour
+    "आटा": "atta",
+    "आटे": "atta",
+    "aata": "atta",
+    # Milk / Doodh
+    "दूध": "milk",
+    "doodh": "milk",
+    "dudh": "milk",
+    # Salt
+    "नमक": "salt",
+    "namak": "salt",
+    # Biscuits
+    "बिस्किट": "biscuit",
+    "biskut": "biscuit",
+    "biscuit": "biscuit",
+    # Oil
+    "तेल": "oil",
+    "tel": "oil",
+    # Sugar
+    "चीनी": "sugar",
+    "chini": "sugar",
+    # Rice
+    "चावल": "rice",
+    "chawal": "rice",
+    # Dal / lentils
+    "दाल": "dal",
+    # Tea
+    "चाय": "tea",
+    "chai": "tea",
+}
+
+
+def _expand_query_variants(query: str) -> list[str]:
+    """
+    Return a list of search terms to try for a given query string.
+    Includes the original, lowercased, and any transliteration expansions.
+    """
+    q = query.strip()
+    variants = []
+
+    # 1. Original query (preserves Devanagari for icontains)
+    if q:
+        variants.append(q)
+
+    # 2. Lowercase version (helps for English mixed-case)
+    ql = q.lower()
+    if ql not in variants:
+        variants.append(ql)
+
+    # 3. Transliteration lookup (Devanagari / Hinglish → English)
+    mapped = _TRANSLITERATION_MAP.get(ql)
+    if mapped and mapped not in variants:
+        variants.append(mapped)
+
+    return variants
+
+
 def search_product(shop_id, query):
-    """Search active products in a specific shop."""
-    return Product.objects.filter(
-        shop_id=shop_id,
-        is_active=True,
-        name__icontains=query
-    ).order_by('name')
+    """
+    Search active products in a specific shop.
+
+    Tries multiple query variants (original + transliterations) so that
+    Hindi terms like 'मैगी' correctly match 'Maggi 2-Minute Noodles',
+    and Hinglish terms like 'aata' match 'Aashirvaad Atta'.
+
+    Shop isolation and is_active filter are always preserved.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    variants = _expand_query_variants(query)
+    log.debug("[search_product] shop=%s raw_query=%r variants=%r", shop_id, query, variants)
+
+    seen_ids: set[int] = set()
+    results = []
+
+    for variant in variants:
+        qs = Product.objects.filter(
+            shop_id=shop_id,
+            is_active=True,
+            name__icontains=variant
+        ).order_by('name')
+        for p in qs:
+            if p.id not in seen_ids:
+                seen_ids.add(p.id)
+                results.append(p)
+
+    log.debug("[search_product] found %d product(s): %s",
+              len(results), [p.name for p in results])
+    return results
 
 def check_stock(shop_id, product_id, quantity):
     """Check if requested quantity is available in stock for a shop's product."""

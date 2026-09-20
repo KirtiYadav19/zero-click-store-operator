@@ -2,13 +2,7 @@ from decimal import Decimal
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
 from home.models import ShopkeeperProfile, Shop, Product, Order, OrderItem
-from home.services import (
-    add_to_cart,
-    remove_from_cart,
-    clear_cart,
-    get_cart,
-    place_order_atomic
-)
+from home import services, gemini_service
 
 class ShopkeeperAndInventoryTestCase(TestCase):
     def setUp(self):
@@ -67,33 +61,33 @@ class CartAndOrderTestCase(TestCase):
     def test_cart_operations(self):
         """Test session-based cart addition, calculation, and removal."""
         session = self.client.session
-        success1, _ = add_to_cart(session, self.shop.id, self.p1.id, 2)
-        success2, _ = add_to_cart(session, self.shop.id, self.p2.id, 5)
+        success1, _ = services.add_to_cart(session, self.shop.id, self.p1.id, 2)
+        success2, _ = services.add_to_cart(session, self.shop.id, self.p2.id, 5)
 
         self.assertTrue(success1)
         self.assertTrue(success2)
 
-        cart_data = get_cart(session, self.shop.id)
+        cart_data = services.get_cart(session, self.shop.id)
         self.assertEqual(len(cart_data['items']), 2)
 
         # 2 * 28 + 5 * 10 = 56 + 50 = 106.00
         self.assertEqual(cart_data['total'], Decimal('106.00'))
 
-        remove_from_cart(session, self.shop.id, self.p1.id)
-        cart_after_remove = get_cart(session, self.shop.id)
+        services.remove_from_cart(session, self.shop.id, self.p1.id)
+        cart_after_remove = services.get_cart(session, self.shop.id)
         self.assertEqual(len(cart_after_remove['items']), 1)
 
-        clear_cart(session, self.shop.id)
-        cart_empty = get_cart(session, self.shop.id)
+        services.clear_cart(session, self.shop.id)
+        cart_empty = services.get_cart(session, self.shop.id)
         self.assertEqual(len(cart_empty['items']), 0)
 
     def test_atomic_order_creation_and_stock_deduction(self):
         """Test transaction-safe order placement and inventory deduction."""
         session = self.client.session
-        add_to_cart(session, self.shop.id, self.p1.id, 3)
-        add_to_cart(session, self.shop.id, self.p2.id, 2)
+        services.add_to_cart(session, self.shop.id, self.p1.id, 3)
+        services.add_to_cart(session, self.shop.id, self.p2.id, 2)
 
-        order, err = place_order_atomic(
+        order, err = services.place_order_atomic(
             session=session,
             shop_id=self.shop.id,
             customer_name='Amit Verma',
@@ -116,10 +110,99 @@ class CartAndOrderTestCase(TestCase):
     def test_order_creation_insufficient_stock_fails(self):
         """Test that adding quantity exceeding stock returns failure error."""
         session = self.client.session
-        success, msg = add_to_cart(session, self.shop.id, self.p1.id, 15) # Only 10 in stock
+        success, msg = services.add_to_cart(session, self.shop.id, self.p1.id, 15) # Only 10 in stock
         self.assertFalse(success)
         self.assertIn("Only 10 items available", msg)
 
         # Stock should remain untouched (10)
         self.p1.refresh_from_db()
         self.assertEqual(self.p1.stock, 10)
+
+
+class MultilingualProductUnderstandingTestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='shopkeeper_demo', password='Password123!')
+        self.profile = ShopkeeperProfile.objects.create(user=self.user, phone='9876543210')
+        self.shop = Shop.objects.create(shopkeeper=self.profile, name='Rahul General Store')
+
+        self.maggi = Product.objects.create(
+            shop=self.shop,
+            name='Maggi 2-Minute Noodles',
+            price=Decimal('15.00'),
+            unit='packet',
+            stock=8,
+            is_active=True
+        )
+        self.atta = Product.objects.create(
+            shop=self.shop,
+            name='Aashirvaad Atta 5kg',
+            price=Decimal('240.00'),
+            unit='packet',
+            stock=12,
+            is_active=True
+        )
+        self.milk = Product.objects.create(
+            shop=self.shop,
+            name='Amul Milk 1L',
+            price=Decimal('65.00'),
+            unit='litre',
+            stock=10,
+            is_active=True
+        )
+        self.client = Client()
+
+    def test_extract_product_name_utility(self):
+        """Test product keyword extraction from full sentences."""
+        extracted1 = gemini_service._extract_product_name("क्या हमारे पास मैगी है स्टॉक में?")
+        self.assertIn("मैगी", extracted1)
+
+        extracted2 = gemini_service._extract_product_name("Do you have Maggi?")
+        self.assertIn("maggi", extracted2.lower())
+
+        extracted3 = gemini_service._extract_product_name("Maggi stock mein hai?")
+        self.assertIn("maggi", extracted3.lower())
+
+    def test_hindi_stock_query(self):
+        """Test Hindi full-sentence stock availability query without cart mutation."""
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "क्या हमारे पास मैगी है स्टॉक में?")
+        
+        self.assertIn("Maggi 2-Minute Noodles", res["reply"])
+        self.assertIn("8", res["reply"]) # Reports exact DB stock 8
+        self.assertEqual(len(res["cart"]["items"]), 0) # Cart untouched
+
+    def test_hinglish_stock_query(self):
+        """Test Hinglish stock availability query."""
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "Maggi stock mein hai?")
+
+        self.assertIn("Maggi 2-Minute Noodles", res["reply"])
+        self.assertIn("8", res["reply"])
+        self.assertEqual(len(res["cart"]["items"]), 0)
+
+    def test_english_stock_query(self):
+        """Test English stock query."""
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "Do you have Maggi?")
+
+        self.assertIn("Maggi 2-Minute Noodles", res["reply"])
+        self.assertIn("8", res["reply"])
+        self.assertEqual(len(res["cart"]["items"]), 0)
+
+    def test_hindi_price_query(self):
+        """Test Hindi price query without cart mutation."""
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "मैगी कितने की है?")
+
+        self.assertIn("Maggi 2-Minute Noodles", res["reply"])
+        self.assertIn("15", res["reply"]) # ₹15
+        self.assertEqual(len(res["cart"]["items"]), 0)
+
+    def test_add_to_cart_intent(self):
+        """Test explicit add to cart intent in Hindi/Hinglish."""
+        session = self.client.session
+        res = gemini_service._rule_based_nlp_handler(session, self.shop.id, "एक Maggi दे दो")
+
+        self.assertIn("Added 1 × Maggi 2-Minute Noodles", res["reply"])
+        self.assertEqual(len(res["cart"]["items"]), 1)
+        self.assertEqual(res["cart"]["items"][0]["name"], "Maggi 2-Minute Noodles")
