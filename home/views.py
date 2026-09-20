@@ -1,15 +1,23 @@
 import json
+import io
+import logging
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 from .models import ShopkeeperProfile, Shop, Product, Order, OrderItem
 from .forms import ProductForm
 from . import services
 from . import gemini_service
 from . import sarvam_service
+
+logger = logging.getLogger(__name__)
 
 def _get_user_shop(user):
     profile = getattr(user, 'profile', None)

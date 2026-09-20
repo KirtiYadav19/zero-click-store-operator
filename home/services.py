@@ -350,7 +350,13 @@ def place_order_atomic(session, shop_id, customer_name, customer_phone, customer
             prod.stock -= item_data['quantity']
             prod.save()
 
-        # 5. Clear session cart
+        # 5. Clear session cart and track order authorization
         clear_cart(session, shop_id)
+        session['last_order_id'] = order.id
+        placed_orders = session.get('placed_order_ids', [])
+        if order.id not in placed_orders:
+            placed_orders.append(order.id)
+        session['placed_order_ids'] = placed_orders
+        session.modified = True
 
         return order, None
