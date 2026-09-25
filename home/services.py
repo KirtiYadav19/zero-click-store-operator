@@ -47,26 +47,152 @@ def format_distance(distance_meters):
         km = distance_meters / 1000.0
         return f"{km:.1f} km away"
 
-def get_nearby_active_shops(customer_lat=None, customer_lng=None):
+# ---------------------------------------------------------------------------
+# Shop Priority Scoring
+# ---------------------------------------------------------------------------
+
+def _compute_inventory_score(shop):
     """
-    Retrieve active shops sorted by geographic distance if customer coordinates are provided.
+    Sum of active product stock for a shop.
+    More stock → higher inventory score.
+    """
+    from django.db.models import Sum
+    result = shop.products.filter(is_active=True).aggregate(total=Sum('stock'))
+    return result['total'] or 0
+
+
+def _compute_purchase_score(shop, customer_phone):
+    """
+    Total amount (₹) spent by this customer (identified by phone) at this shop.
+    Returns 0 when customer_phone is None or no purchase history exists.
+    """
+    if not customer_phone:
+        return 0
+    from decimal import Decimal
+    try:
+        total = (
+            Order.objects
+            .filter(shop=shop, customer__phone=customer_phone, status__in=['confirmed', 'completed'])
+            .aggregate(total=__import__('django.db.models', fromlist=['Sum']).Sum('total_amount'))
+        )['total']
+        return float(total or 0)
+    except Exception:
+        return 0
+
+
+def _compute_priority_score(distance_meters, purchase_amount, inventory_total,
+                            max_distance, max_purchase, max_inventory):
+    """
+    Composite priority score in [0, 100].
+
+    Weights:
+      - Distance   : 40 %  (closer → higher score)
+      - Purchase   : 35 %  (more spent → higher score)
+      - Inventory  : 25 %  (more stock → higher score)
+
+    Each factor is normalised to [0, 1] before weighting.
+    """
+    # Distance factor: 1 when distance is 0, 0 when distance equals max
+    if max_distance and max_distance > 0 and distance_meters is not None:
+        dist_factor = 1.0 - (distance_meters / max_distance)
+        dist_factor = max(0.0, min(1.0, dist_factor))
+    elif distance_meters is None:
+        dist_factor = 0.0          # no location data → lowest distance rank
+    else:
+        dist_factor = 1.0          # only one shop with location
+
+    # Purchase factor
+    if max_purchase and max_purchase > 0:
+        purchase_factor = purchase_amount / max_purchase
+    else:
+        purchase_factor = 0.0
+
+    # Inventory factor
+    if max_inventory and max_inventory > 0:
+        inventory_factor = inventory_total / max_inventory
+    else:
+        inventory_factor = 0.0
+
+    score = (dist_factor * 40.0) + (purchase_factor * 35.0) + (inventory_factor * 25.0)
+    return round(score, 1)
+
+
+def _priority_label(score):
+    """Return a human-readable priority tier label."""
+    if score >= 65:
+        return 'Top Pick'
+    if score >= 40:
+        return 'Recommended'
+    if score >= 20:
+        return 'Nearby'
+    return 'Available'
+
+
+def get_nearby_active_shops(customer_lat=None, customer_lng=None, customer_phone=None):
+    """
+    Retrieve active shops ranked by a composite priority score:
+      • Distance   (40 %) — closer is better
+      • Purchase history (35 %) — more spent by this customer at this shop is better
+      • Inventory  (25 %) — more total stock is better
+
     Shops without coordinates are listed after location-enabled shops.
-    Returns list of dicts: [{'shop': shop_obj, 'distance_meters': float|None, 'distance_text': str|None}]
+    Returns list of dicts:
+      {
+        'shop': shop_obj,
+        'distance_meters': float|None,
+        'distance_text': str|None,
+        'priority_score': float,        # 0-100
+        'priority_label': str,
+        'inventory_total': int,
+        'purchase_total': float,
+      }
     """
+    from django.db.models import Sum
+
     shops = list(Shop.objects.filter(is_active=True).order_by('name'))
 
-    if customer_lat is None or customer_lng is None:
-        return [{'shop': s, 'distance_meters': None, 'distance_text': None} for s in shops]
+    # --- Pre-compute inventory totals for all shops in one query ---
+    inv_map = {}
+    inv_qs = (
+        Product.objects
+        .filter(shop__in=shops, is_active=True)
+        .values('shop_id')
+        .annotate(total=Sum('stock'))
+    )
+    for row in inv_qs:
+        inv_map[row['shop_id']] = row['total'] or 0
 
-    try:
-        clat = float(customer_lat)
-        clng = float(customer_lng)
-    except (ValueError, TypeError):
-        return [{'shop': s, 'distance_meters': None, 'distance_text': None} for s in shops]
+    # --- Pre-compute purchase totals for this customer ---
+    purchase_map = {}
+    if customer_phone:
+        try:
+            purchase_qs = (
+                Order.objects
+                .filter(
+                    shop__in=shops,
+                    customer__phone=customer_phone,
+                    status__in=['confirmed', 'completed'],
+                )
+                .values('shop_id')
+                .annotate(total=Sum('total_amount'))
+            )
+            for row in purchase_qs:
+                purchase_map[row['shop_id']] = float(row['total'] or 0)
+        except Exception:
+            pass
+
+    # --- Compute distances ---
+    clat, clng = None, None
+    if customer_lat is not None and customer_lng is not None:
+        try:
+            clat = float(customer_lat)
+            clng = float(customer_lng)
+        except (ValueError, TypeError):
+            clat, clng = None, None
 
     result = []
     for shop in shops:
-        if shop.latitude is not None and shop.longitude is not None:
+        if clat is not None and clng is not None and shop.latitude is not None and shop.longitude is not None:
             dist = calculate_haversine_distance(clat, clng, float(shop.latitude), float(shop.longitude))
             dist_text = format_distance(dist)
         else:
@@ -76,11 +202,37 @@ def get_nearby_active_shops(customer_lat=None, customer_lng=None):
         result.append({
             'shop': shop,
             'distance_meters': dist,
-            'distance_text': dist_text
+            'distance_text': dist_text,
+            'inventory_total': inv_map.get(shop.id, 0),
+            'purchase_total': purchase_map.get(shop.id, 0.0),
+            'priority_score': 0.0,
+            'priority_label': 'Available',
         })
 
-    # Sort location-enabled shops by distance ascending, followed by non-location enabled shops
-    result.sort(key=lambda x: (x['distance_meters'] is None, x['distance_meters'] or float('inf'), x['shop'].name))
+    # --- Normalise across the full result set ---
+    distances_with_val = [r['distance_meters'] for r in result if r['distance_meters'] is not None]
+    max_distance  = max(distances_with_val) if distances_with_val else 0
+    max_purchase  = max((r['purchase_total'] for r in result), default=0)
+    max_inventory = max((r['inventory_total'] for r in result), default=0)
+
+    for r in result:
+        score = _compute_priority_score(
+            r['distance_meters'],
+            r['purchase_total'],
+            r['inventory_total'],
+            max_distance,
+            max_purchase,
+            max_inventory,
+        )
+        r['priority_score'] = score
+        r['priority_label'] = _priority_label(score)
+
+    # --- Sort: highest priority first; ties broken by distance then name ---
+    result.sort(key=lambda x: (
+        -x['priority_score'],
+        x['distance_meters'] if x['distance_meters'] is not None else float('inf'),
+        x['shop'].name,
+    ))
     return result
 
 

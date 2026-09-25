@@ -49,11 +49,20 @@
 <div class="card">
     <div style="text-align: center; margin-bottom: 1.5rem;">
         <h2 style="border: none; margin-bottom: 0.5rem; font-size: 1.6rem; color: #1a2530;">📍 Nearby Stores</h2>
-        <p style="color: #666; font-size: 1rem;">Select a shop below to start ordering with your AI-powered cashier.</p>
+        <p style="color: #666; font-size: 1rem;">Shops are ranked by distance, your purchase history, and available inventory.</p>
+    </div>
+
+    <!-- Priority legend -->
+    <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1.25rem; font-size: 0.8rem;">
+        <span style="background:#fef9c3; color:#92400e; border:1px solid #fbbf24; border-radius:12px; padding:0.2rem 0.7rem; font-weight:700;">⭐ Top Pick ≥ 65</span>
+        <span style="background:#dcfce7; color:#166534; border:1px solid #86efac; border-radius:12px; padding:0.2rem 0.7rem; font-weight:700;">✅ Recommended ≥ 40</span>
+        <span style="background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; border-radius:12px; padding:0.2rem 0.7rem; font-weight:700;">📍 Nearby ≥ 20</span>
+        <span style="background:#f3f4f6; color:#374151; border:1px solid #d1d5db; border-radius:12px; padding:0.2rem 0.7rem; font-weight:600;">🏪 Available</span>
+        <span style="margin-left:auto; color:#888; font-size:0.75rem; align-self:center;">Score = 40% distance + 35% purchases + 25% inventory</span>
     </div>
 
     <!-- Location Detection Controls -->
-    <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1.25rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+    <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
         <div>
             {% if customer_lat and customer_lng %}
                 <span style="display: inline-flex; align-items: center; gap: 0.4rem; color: #27ae60; font-weight: 600; font-size: 0.95rem;">
@@ -80,39 +89,85 @@
         </div>
     </div>
 
+    <!-- Personalise ranking by phone (returning customers) -->
+    <div style="background: #fff8f0; border: 1px solid #fed7aa; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 2rem;">
+        <form method="get" id="phone-form" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            {% if customer_lat %}<input type="hidden" name="lat" value="{{ customer_lat }}">{% endif %}
+            {% if customer_lng %}<input type="hidden" name="lng" value="{{ customer_lng }}">{% endif %}
+            <label style="font-size:0.9rem; color:#92400e; font-weight:600;">📱 Your Phone (for personalised ranking):</label>
+            <input type="tel" name="phone" value="{{ customer_phone|default:'' }}"
+                   placeholder="e.g. 9876543210"
+                   style="border:1px solid #fed7aa; border-radius:6px; padding:0.4rem 0.75rem; font-size:0.9rem; width:180px;">
+            <button type="submit" class="btn" style="background:#f97316; color:#fff; border:none; padding:0.4rem 1rem; font-size:0.88rem;">
+                Apply
+            </button>
+            {% if customer_phone %}
+                <span style="color:#15803d; font-size:0.85rem; font-weight:600;">✓ Personalised for {{ customer_phone }}</span>
+            {% endif %}
+        </form>
+    </div>
+
     <!-- Interactive Google Map (Optional / Toggleable) -->
     <div id="customer-map-container" style="display: none; margin-bottom: 2rem;">
         <div id="customer-map" style="width: 100%; height: 350px; border-radius: 10px; border: 1px solid #ccc; background: #e9ecef;"></div>
     </div>
 
     {% if shops_data %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem;">
             {% for item in shops_data %}
-                {% with shop=item.shop distance=item.distance_text %}
-                <div style="background: #fff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-direction: column; justify-content: space-between; transition: border-color 0.2s;"
-                     onmouseover="this.style.borderColor='#27ae60'" onmouseout="this.style.borderColor='#e0e0e0'">
+                {% with shop=item.shop distance=item.distance_text score=item.priority_score label=item.priority_label %}
+
+                {# Derive card accent colours inline via if/else (Django DTL has no elif inside with) #}
+                <div style="background: #fff;
+                            border: 2px solid {% if label == 'Top Pick' %}#fbbf24{% else %}{% if label == 'Recommended' %}#86efac{% else %}{% if label == 'Nearby' %}#93c5fd{% else %}#e0e0e0{% endif %}{% endif %}{% endif %};
+                            border-radius: 10px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                            <h3 style="font-size: 1.2rem; color: #2c3e50;">{{ shop.name }}</h3>
+                        <!-- Header row: name + open badge -->
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <h3 style="font-size: 1.15rem; color: #2c3e50; margin: 0;">{{ shop.name }}</h3>
                             <span class="badge badge-active">Open</span>
                         </div>
-                        
-                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 0.35rem;">📍 {{ shop.address|default:"Local Market" }}</p>
-                        <p style="color: #666; font-size: 0.9rem; margin-bottom: 0.35rem;">📞 {{ shop.phone|default:"Available" }}</p>
 
-                        {% if distance %}
-                            <div style="margin-top: 0.5rem; margin-bottom: 1rem;">
-                                <span style="background: #e8f8f5; color: #27ae60; border: 1px solid #a3e4d7; border-radius: 12px; padding: 0.25rem 0.75rem; font-size: 0.85rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.3rem;">
-                                    📍 {{ distance }}
+                        <!-- Priority badge + score -->
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+                            {% if label == 'Top Pick' %}
+                                <span style="background:#fef9c3; color:#92400e; border:1px solid #fbbf24; border-radius:12px; padding:0.2rem 0.65rem; font-size:0.8rem; font-weight:700;">⭐ Top Pick</span>
+                            {% else %}{% if label == 'Recommended' %}
+                                <span style="background:#dcfce7; color:#166534; border:1px solid #86efac; border-radius:12px; padding:0.2rem 0.65rem; font-size:0.8rem; font-weight:700;">✅ Recommended</span>
+                            {% else %}{% if label == 'Nearby' %}
+                                <span style="background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; border-radius:12px; padding:0.2rem 0.65rem; font-size:0.8rem; font-weight:700;">📍 Nearby</span>
+                            {% else %}
+                                <span style="background:#f3f4f6; color:#374151; border:1px solid #d1d5db; border-radius:12px; padding:0.2rem 0.65rem; font-size:0.8rem; font-weight:600;">🏪 Available</span>
+                            {% endif %}{% endif %}{% endif %}
+                            <span style="color:#888; font-size:0.78rem;">Score: <strong style="color:#1a2530;">{{ score }}</strong>/100</span>
+                        </div>
+
+                        <!-- Score progress bar -->
+                        <div style="background:#e9ecef; border-radius:6px; height:6px; margin-bottom:0.85rem; overflow:hidden;">
+                            <div style="
+                                background:{% if label == 'Top Pick' %}#fbbf24{% else %}{% if label == 'Recommended' %}#86efac{% else %}{% if label == 'Nearby' %}#93c5fd{% else %}#d1d5db{% endif %}{% endif %}{% endif %};
+                                width:{{ score }}%; height:100%; border-radius:6px;"></div>
+                        </div>
+
+                        <p style="color: #666; font-size: 0.88rem; margin-bottom: 0.3rem;">📍 {{ shop.address|default:"Local Market" }}</p>
+                        <p style="color: #666; font-size: 0.88rem; margin-bottom: 0.5rem;">📞 {{ shop.phone|default:"Available" }}</p>
+
+                        <!-- Stats row: distance · inventory · purchase -->
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem;">
+                            {% if distance %}
+                                <span style="background:#e8f8f5; color:#27ae60; border:1px solid #a3e4d7; border-radius:10px; padding:0.2rem 0.6rem; font-size:0.8rem; font-weight:700;">
+                                    📏 {{ distance }}
                                 </span>
-                            </div>
-                        {% else %}
-                            <div style="margin-top: 0.5rem; margin-bottom: 1rem;">
-                                <span style="background: #f4f6f7; color: #7f8c8d; border: 1px solid #e5e8e8; border-radius: 12px; padding: 0.25rem 0.75rem; font-size: 0.85rem; font-weight: 500;">
-                                    Store
+                            {% endif %}
+                            <span style="background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:10px; padding:0.2rem 0.6rem; font-size:0.8rem;" title="Total active stock units">
+                                📦 {{ item.inventory_total }} units
+                            </span>
+                            {% if item.purchase_total > 0 %}
+                                <span style="background:#fef3c7; color:#92400e; border:1px solid #fde68a; border-radius:10px; padding:0.2rem 0.6rem; font-size:0.8rem; font-weight:600;" title="Your total purchases from this shop">
+                                    🛍️ ₹{{ item.purchase_total|floatformat:0 }} spent
                                 </span>
-                            </div>
-                        {% endif %}
+                            {% endif %}
+                        </div>
                     </div>
                     <a href="{% url 'customer_shop_order' shop.id %}" class="btn" style="width: 100%; display: block; text-align: center;">
                         ORDER NOW →

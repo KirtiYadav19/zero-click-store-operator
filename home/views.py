@@ -321,7 +321,7 @@ def shopkeeper_product_edit(request, pk):
 # --- CUSTOMER VIEWS ---
 
 def customer_home(request):
-    """Customer home page listing active shops sorted by distance if location provided."""
+    """Customer home page listing active shops ranked by priority (distance + purchase history + inventory)."""
     lat = request.GET.get('lat') or request.session.get('customer_lat')
     lng = request.GET.get('lng') or request.session.get('customer_lng')
 
@@ -330,13 +330,20 @@ def customer_home(request):
         request.session['customer_lng'] = request.GET.get('lng')
         request.session.modified = True
 
-    shops_data = services.get_nearby_active_shops(lat, lng)
+    # Persist customer phone across requests to personalise priority ranking
+    phone = request.GET.get('phone') or request.session.get('customer_phone')
+    if request.GET.get('phone'):
+        request.session['customer_phone'] = request.GET.get('phone')
+        request.session.modified = True
+
+    shops_data = services.get_nearby_active_shops(lat, lng, customer_phone=phone)
     google_maps_api_key = config('GOOGLE_MAPS_API_KEY', default='')
 
     context = {
         'shops_data': shops_data,
         'customer_lat': lat,
         'customer_lng': lng,
+        'customer_phone': phone,
         'google_maps_api_key': google_maps_api_key,
     }
     return render(request, 'customer/home.html', context)
